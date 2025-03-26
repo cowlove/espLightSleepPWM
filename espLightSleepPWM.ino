@@ -1,24 +1,24 @@
-#include <stdio.h>
-#include <Arduino.h>
-#include "freertos/task.h"
-#include "driver/ledc.h"
-#include "esp_err.h"
-#include "esp_pm.h"
-#include "esp_sleep.h"
-#include "driver/uart.h"
-#include "esp32/rom/uart.h"
-#include "ulp_common.h"
-#include "esp32/ulp.h"
-
 #include "jimlib.h"
 
 #include <ArduinoJson.h>
+
+#ifndef CSIM
+#include "driver/ledc.h"
+#include "rom/uart.h"
 #include <HTTPClient.h>
+#endif
 
 using std::string;
 using std::vector;
 
 JStuff j;
+
+struct {
+    int bv1 = 0;
+    int bv2 = 0;
+    int pwm = 27;
+    int power = 2;
+} pins;
 
 struct LightSleepPWM { 
     static const ledc_timer_t LEDC_LS_TIMER  = LEDC_TIMER_0;
@@ -59,12 +59,11 @@ struct LightSleepPWM {
         ledc_update_duty(LEDC_LS_MODE, chan);
         esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_AUTO);
         delay(100);
-        printf("Frequency %u Hz duty %d\n", 
-            ledc_get_freq(LEDC_LS_MODE, LEDC_LS_TIMER),
-            ledc_get_duty(LEDC_LS_MODE, chan));
+        //printf("Frequency %u Hz duty %d\n", 
+        //    ledc_get//_freq(LEDC_LS_MODE, LEDC_LS_TIMER),
+        //    ledc_get_duty(LEDC_LS_MODE, chan));
     }    
 } ls;
-
 
 class DeepSleepElapsedTime {
     SPIFFSVariable<int> bootStartMs = SPIFFSVariable<int>("/deepSleepElapsedTime", 0);
@@ -74,8 +73,6 @@ public:
     int elapsed() { return bootStartMs + millis(); }
     void reset() { bootStartMs = -((int)millis()); }
 };
-
-DeepSleepElapsedTime reportTimer;
 
 template<> bool fromString(const string &s, std::vector<string> &v) {
     v = split(s, '\n');
@@ -88,25 +85,7 @@ template<> string toString(const std::vector<string> &v) {
     return rval;
 }
 
-SPIFFSVariable<vector<string>> reportLog("/reportLog", {});
-
-void logReport() { 
-    String mac = getMacAddress();
-    string s = 
-        sfmt("{\"PROGRAM\":\"%s\",", basename_strip_ext(__BASE_FILE__).c_str()) + 
-        sfmt("\"TSL\":%d,", (int)reportTimer.elapsed()) + 
-        sfmt("\"GIT_VERSION\":\"%s\",", GIT_VERSION) + 
-        sfmt("\"MAC\":\"%s\",", mac.c_str()) + 
-        sfmt("\"SSID\":\"%s\",", WiFi.SSID().c_str()) + 
-        sfmt("\"IP\":\"%s\",", WiFi.localIP().toString().c_str()) + 
-        sfmt("\"RSSI\":%d}\n", WiFi.RSSI());
-
-    vector<string> logs = reportLog;
-    logs.push_back(s);
-    reportLog = logs;
-}
-
-void wifiConnect() { 
+bool wifiConnect() { 
     OUT("connecting"); 
     j.jw.enabled = true;
     j.mqtt.active = false;
@@ -118,6 +97,7 @@ void wifiConnect() {
     }
     OUT("Connected to AP '%s' in %dms, IP=%s, channel=%d, RSSI=%d\n",
         WiFi.SSID().c_str(), millis(), WiFi.localIP().toString().c_str(), WiFi.channel(), WiFi.RSSI());
+    return WiFi.status() == WL_CONNECTED;
 }
 
 void wifiDisconnect() { 
@@ -126,93 +106,238 @@ void wifiDisconnect() {
     j.jw.enabled = false;
 }
 
-void postReport() { 
-    wifiConnect();
-    if (WiFi.status() != WL_CONNECTED)
-        return;
+SPIFFSVariable<string> configString("/configString3", "");
 
-    HTTPClient client;
-    int r = client.begin("http://vheavy.com/log");
-    OUT("http.begin() returned %d", r);
-    client.addHeader("Content-Type", "application/json");
-    
-    bool fail = false;
-    while(reportLog.get().size() > 0) { 
-        string s = reportLog.get()[0];
-        if (s.length() > 0) {  
-            Serial.printf("POST '%s'\n", s.c_str());
-            for(int retry = 0; retry < 5; retry ++) {
-                wdtReset(); 
-                r = client.POST(s.c_str());
-                String resp =  client.getString();
-                OUT("http.POST returned %d: %s", r, resp.c_str());
-                if (r == 200) 
-                    break;
-            }
-            if (r != 200) {  
-                fail = true;
-                break;
-            }
-        }
-        vector<string> logs = reportLog;
-        logs.erase(logs.begin());
-        reportLog = logs;
+class SleepyLogger { 
+public:
+    SPIFFSVariable<vector<string>> reportLog = SPIFFSVariable<vector<string>>("/reportLog", {});
+    SPIFFSVariable<int> reportCount = SPIFFSVariable<int>("/reportCount", 0);
+    SPIFFSVariable<int> logCount = SPIFFSVariable<int>("/logCount", 0);
+    SPIFFSVariable<float> reportTime = SPIFFSVariable<float>("/reportTime", 60);
+    DeepSleepElapsedTime reportTimer;
+    string url;
+
+    SleepyLogger(const char *u) : url(u) {
+        if (reportTimer.elapsed() < 1000) 
+            reportTimer.reset();
     }
-    client.end();
-    wifiDisconnect();
 
-    if (reportLog.get().size() == 0) 
-        reportTimer.reset();
-}
+    void prepareSleep(int ms) {
+        reportTimer.sleep(ms);
+    }
+    JsonDocument post() {
+        JsonDocument rval; 
+        if (!wifiConnect())
+            return rval;
+
+        HTTPClient client;
+        int r = client.begin(url.c_str());
+        OUT("http.begin() returned %d", r);
+        client.addHeader("Content-Type", "application/json");
+        
+        bool fail = false;
+        while(reportLog.read().size() > 0) { 
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, reportLog.read()[0]);
+
+            if (!error && doc["TSL"].as<int>() != 0) {
+                doc["LogTimeOffsetSec"] = (reportTimer.elapsed() - doc["TSL"].as<int>()) / 1000.0;
+                string s;
+                serializeJson(doc, s);
+                Serial.printf("POST '%s'\n", s.c_str());
+                for(int retry = 0; retry < 5; retry ++) {
+                    wdtReset(); 
+                    r = client.POST(s.c_str());
+                    String resp =  client.getString();
+                    deserializeJson(rval, resp.c_str());
+                    OUT("http.POST returned %d: %s", r, resp.c_str());
+                    if (r == 200) 
+                        break;
+                }
+                if (r != 200) {  
+                    fail = true;
+                    break;
+                }
+            }
+            vector<string> logs = reportLog;
+            logs.erase(logs.begin());
+            reportLog = logs;
+        }
+        client.end();
+        wifiDisconnect();
+
+        if (reportLog.read().size() == 0) 
+            reportTimer.reset();
+        reportCount = reportCount + 1;
+        return rval;
+    }
+
+    JsonDocument log(JsonDocument doc, bool forcePost = false) {
+        JsonDocument result; 
+        logCount = logCount + 1;
+        doc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
+        doc["TSL"] = reportTimer.elapsed();
+        doc["MAC"] = getMacAddress().c_str();
+        string s;
+        serializeJson(doc, s);    
+        vector<string> logs = reportLog;
+        logs.push_back(s);
+        reportLog = logs;
+        if (forcePost == true || reportTimer.elapsed() > reportTime * 60 * 1000)
+            result = post();
+        return result;
+    }
+};
 
 void deepSleep(int ms) { 
     OUT("%09.3f DEEP SLEEP for %dms", millis() / 1000.0, ms);
     esp_sleep_enable_timer_wakeup(1000LL * ms);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-    reportTimer.sleep(ms);
     esp_deep_sleep_start();        
 }
 
 void lightSleep(int ms) { 
-    OUT("%09.3f LIGHT SLEEP for %ds", millis() / 1000.0, ms);
+    OUT("%09.3f LIGHT SLEEP for %dms", millis() / 1000.0, ms);
     esp_sleep_enable_timer_wakeup(ms * 1000L);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
     esp_light_sleep_start();
 }
 
-struct { 
-    int pwm = 26;
-    int power = 2;
-} pins;
+class SimplePID { 
+public:
+    float pgain = 1, igain = 1, dgain = 1, fgain = 10;
+    float lastError = -1, iSum = 0;
+    bool operator ==(const SimplePID &b) { 
+        return memcmp((void *)this, (void *)&b, sizeof(*this)) == 0;
+    }
+    float calc(float err) {
+        iSum += err;
+        float rval = pgain * err + igain * iSum + dgain * (lastError - err);
+        lastError = err;
+        return rval; 
+     }
+    bool convertToJson(JsonVariant dst) const { 
+        char buf[128];
+        snprintf(buf, sizeof(buf), "P=%f I=%f D=%f F=%f L=%f S=%f", 
+            pgain, igain, dgain, fgain, lastError, iSum);
+        return dst.set(buf);
+    }
+    void convertFromJson(JsonVariantConst src) { 
+        if(src.as<const char *>() != NULL)
+            sscanf(src.as<const char *>(), "P=%f I=%f D=%f F=%f L=%f S=%f", 
+                &pgain, &igain, &dgain, &fgain, &lastError, &iSum);
+    }
+};
 
+template <class T>
+bool convertToJson(const T &p, JsonVariant dst) { return p.convertToJson(dst); }
+
+template <class T>
+void convertFromJson(JsonVariantConst src, T &p) { p.convertFromJson(src); }
+
+struct Config {
+    SimplePID pid;
+    float sampleTime;
+    float reportTime;
+    bool convertToJson(JsonVariant dst) const {
+        dst["PID"] = pid;
+        dst["SampleTime"] = sampleTime;
+        dst["reportTime"] = reportTime;
+        return true;
+    } 
+    void convertFromJson(JsonVariantConst src) { 
+        pid = src["PID"];
+        sampleTime = src["SampleTime"] | 0.2;
+        reportTime = src["reportTime"] | 3.0;
+    }
+    void applyNewConfig(const Config &c) { 
+        const Config old = *this;
+        *this = c;
+        pid.iSum = old.pid.iSum;
+        pid.lastError = old.pid.lastError;
+    }
+} config;
+
+
+void readConfig() { 
+    JsonDocument doc;
+    deserializeJson(doc, configString.read());
+    config = doc["CONFIG"];
+}
+
+void printConfig() { 
+    JsonDocument d2;
+    string s;
+    d2["CONFIG"] = config;
+    serializeJson(d2, s);
+    Serial.println(s.c_str());
+}
+void saveConfig() { 
+    JsonDocument d2;
+    string s;
+    d2["CONFIG"] = config;
+    serializeJson(d2, s);
+    configString = s;
+}
+
+SleepyLogger logger("http://192.168.68.73:8080/log");
+
+bool forcePost = false;
 void setup() {
     j.begin();
     j.jw.enabled = j.mqtt.active = false;
-    Serial.begin(115200);
     ls.ledcLightSleepSetup(pins.pwm, LEDC_CHANNEL_2);
+    readConfig();
+    printConfig();
+    print_reset_reason();
+    OUT("RESET REASON: %d %d", rtc_get_reset_reason(0), rtc_get_reset_reason(1));
+    if (rtc_get_reset_reason(0) == 1) 
+        forcePost = true;
 }
 
 int pwm = 1;
-const int sleepSec = 10;
 void loop() {
     j.run();
     OUT("%09.3f WiFi IP: %s", millis() / 1000.0, WiFi.localIP().toString().c_str());
+    OUT("%09.3f logq %d, %d since post, free heap %d",
+        millis() / 1000.0,  (int)logger.reportLog.read().size(), 
+        (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
+
+    logger.reportTime = config.reportTime;
 
     ls.ledcLightSleepSet(pwm);
     pinMode(pins.power, OUTPUT);
     digitalWrite(pins.power, 1);
     pwm = (pwm + 5) % 64;
-    delay(1000);
+    
+    float vpd = 0.0;
+    float fanPwm = config.pid.calc(vpd);
+    
+    JsonDocument doc;
+    doc["PWM"] = fanPwm; 
+    doc["CONFIG"] = config;
+    doc["Voltage1"] = avgAnalogRead(pins.bv1);
+    doc["Voltage2"] = avgAnalogRead(pins.bv2);
+    doc["LogCount"] = (int)logger.logCount;
+    doc["PostCount"] = (int)logger.reportCount;
+    JsonDocument response = logger.log(doc, forcePost);
+    forcePost = false;
+    //OUT("post [status] = %d", response["status"].as<int>());
 
-    logReport();
-    if (reportTimer.elapsed() > 60 * 1000) 
-        postReport();
+    if (response["CONFIG"]) 
+        config.applyNewConfig(response["CONFIG"]);
 
-    if (j.secTick(130)) {
-        deepSleep(sleepSec * 1000); 
+    saveConfig();
+    int sleepMs = config.sampleTime * 60 * 1000;
+    if (false && j.secTick(60)) {
+        logger.prepareSleep(sleepMs);
+        deepSleep(sleepMs); 
+        /*not reached*/
+    } else {
+        lightSleep(sleepMs);
     }
-    lightSleep(sleepSec * 1000);
+    delay(1);
 }
 

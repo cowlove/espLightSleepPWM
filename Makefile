@@ -21,12 +21,17 @@ include ${HOME}/Arduino/libraries/makeEspArduino/makeEspArduino.mk
 csim: ${MAIN_NAME}_csim
 	cp $< $@
 
+CSIM_INC=-I${HOME}/Arduino/libraries/ArduinoJson/src/ -I${HOME}/Arduino/libraries/Arduino_CRC32/src/ -I${HOME}/Arduino/libraries/esp32jimlib/src/
+CSIM_CPP=${HOME}/Arduino/libraries/Arduino_CRC32/src/* 
+
 ${MAIN_NAME}_csim:  
-	g++ -x c++ -g ${MAIN_NAME}.ino -o $@ -DESP32 -DCSIM -DUBUNTU \
-	-I./ -I${HOME}/Arduino/lib -I ${HOME}/Arduino/libraries/esp32jimlib/src/ 
+	g++ -x c++ -fpermissive -g ${MAIN_NAME}.ino -o $@ -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU \
+	-I./  ${CSIM_INC} \
+	${CSIM_CPP}
+        
 
+csim:   ${MAIN_NAME}_csim
 
-csim:	${MAIN_NAME}_csim
 
 fixtty:
 	stty -F ${UPLOAD_PORT} -hupcl -crtscts -echo raw 115200
@@ -45,7 +50,7 @@ uc:
 
 
 backtrace:
-	tr ' ' '\n' | /home/jim/.arduino15/packages/esp32/tools/xtensa-esp32-elf-gcc/*/bin/xtensa-esp32-elf-addr2line -f -i -e /tmp/mkESP/winglevlr_ttgo-t1/*.elf
+	tr ' ' '\n' | /home/jim/.arduino15/packages/esp32/tools/xtensa-esp32-elf-gcc/*/bin/xtensa-esp32-elf-addr2line -f -i -e /tmp/mkESP/${MAIN_NAME}_${BOARD}/*.elf
         
 
 
