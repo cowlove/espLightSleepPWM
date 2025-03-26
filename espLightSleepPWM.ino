@@ -222,7 +222,12 @@ struct Config {
 
 
 
-SleepyLogger logger("http://192.168.68.73:8080/log");
+#ifdef CSIM
+const char *url = "http://localhost:8080/log";
+#else 
+const char *url = "http://vheavy.com/log";
+#endif
+SleepyLogger logger(url);
 
 bool forcePost = false;
 void setup() {
@@ -231,6 +236,8 @@ void setup() {
     ls.ledcLightSleepSetup(pins.pwm, LEDC_CHANNEL_2);
     readConfig();
     printConfig();
+    OUT("quick reboots: %d", j.quickRebootCounter.reboots());
+    if (j.quickRebootCounter.reboots() > 2) forcePost = true;
     //OUT("RESET REASON: %s", reset_reason_string(rtc_get_reset_reason(0)));
     //if (rtc_get_reset_reason(0) == 1) 
     //    forcePost = true;
