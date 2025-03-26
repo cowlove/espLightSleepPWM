@@ -2,3 +2,6 @@
 spiff
 csim
 *_csim
+*.out
+build
+build-*
