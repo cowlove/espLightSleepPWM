@@ -20,6 +20,8 @@ struct {
     int power = 2;
 } pins;
 
+SPIFFSVariable<string> configString("/configString3", "");
+
 struct LightSleepPWM { 
     static const ledc_timer_t LEDC_LS_TIMER  = LEDC_TIMER_0;
     static const ledc_mode_t LEDC_LS_MODE = LEDC_LOW_SPEED_MODE;
@@ -74,40 +76,15 @@ public:
     void reset() { bootStartMs = -((int)millis()); }
 };
 
-template<> bool fromString(const string &s, std::vector<string> &v) {
-    v = split(s, '\n');
-    return true;
-}
+bool wifiConnect();
+void wifiDisconnect();
+void readConfig(); 
+void saveConfig(); 
+void printConfig(); 
+void deepSleep(int ms);
+void lightSleep(int ms);
 
-template<> string toString(const std::vector<string> &v) { 
-    string rval;
-    for(auto line : v) rval += line + "\n";
-    return rval;
-}
-
-bool wifiConnect() { 
-    OUT("connecting"); 
-    j.jw.enabled = true;
-    j.mqtt.active = false;
-    j.jw.onConnect([](){});
-    j.jw.autoConnect();
-    for(int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) { 
-        delay(1000);
-        wdtReset();
-    }
-    OUT("Connected to AP '%s' in %dms, IP=%s, channel=%d, RSSI=%d\n",
-        WiFi.SSID().c_str(), millis(), WiFi.localIP().toString().c_str(), WiFi.channel(), WiFi.RSSI());
-    return WiFi.status() == WL_CONNECTED;
-}
-
-void wifiDisconnect() { 
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
-    j.jw.enabled = false;
-}
-
-SPIFFSVariable<string> configString("/configString3", "");
-
+// TODO: avoid repeated connection attempts
 class SleepyLogger { 
 public:
     SPIFFSVariable<vector<string>> reportLog = SPIFFSVariable<vector<string>>("/reportLog", {});
@@ -175,9 +152,7 @@ public:
     JsonDocument log(JsonDocument doc, bool forcePost = false) {
         JsonDocument result; 
         logCount = logCount + 1;
-        doc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
         doc["TSL"] = reportTimer.elapsed();
-        doc["MAC"] = getMacAddress().c_str();
         string s;
         serializeJson(doc, s);    
         vector<string> logs = reportLog;
@@ -189,21 +164,6 @@ public:
     }
 };
 
-void deepSleep(int ms) { 
-    OUT("%09.3f DEEP SLEEP for %dms", millis() / 1000.0, ms);
-    esp_sleep_enable_timer_wakeup(1000LL * ms);
-    fflush(stdout);
-    uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-    esp_deep_sleep_start();        
-}
-
-void lightSleep(int ms) { 
-    OUT("%09.3f LIGHT SLEEP for %dms", millis() / 1000.0, ms);
-    esp_sleep_enable_timer_wakeup(ms * 1000L);
-    fflush(stdout);
-    uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-    esp_light_sleep_start();
-}
 
 class SimplePID { 
 public:
@@ -261,26 +221,6 @@ struct Config {
 } config;
 
 
-void readConfig() { 
-    JsonDocument doc;
-    deserializeJson(doc, configString.read());
-    config = doc["CONFIG"];
-}
-
-void printConfig() { 
-    JsonDocument d2;
-    string s;
-    d2["CONFIG"] = config;
-    serializeJson(d2, s);
-    Serial.println(s.c_str());
-}
-void saveConfig() { 
-    JsonDocument d2;
-    string s;
-    d2["CONFIG"] = config;
-    serializeJson(d2, s);
-    configString = s;
-}
 
 SleepyLogger logger("http://192.168.68.73:8080/log");
 
@@ -291,8 +231,7 @@ void setup() {
     ls.ledcLightSleepSetup(pins.pwm, LEDC_CHANNEL_2);
     readConfig();
     printConfig();
-    print_reset_reason();
-    OUT("RESET REASON: %d %d", rtc_get_reset_reason(0), rtc_get_reset_reason(1));
+    OUT("RESET REASON: %s", reset_reason_string(rtc_get_reset_reason(0)));
     if (rtc_get_reset_reason(0) == 1) 
         forcePost = true;
 }
@@ -300,7 +239,6 @@ void setup() {
 int pwm = 1;
 void loop() {
     j.run();
-    OUT("%09.3f WiFi IP: %s", millis() / 1000.0, WiFi.localIP().toString().c_str());
     OUT("%09.3f logq %d, %d since post, free heap %d",
         millis() / 1000.0,  (int)logger.reportLog.read().size(), 
         (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
@@ -318,6 +256,7 @@ void loop() {
     JsonDocument doc;
     doc["PWM"] = fanPwm; 
     doc["CONFIG"] = config;
+    doc["VPD"] = vpd;
     doc["Voltage1"] = avgAnalogRead(pins.bv1);
     doc["Voltage2"] = avgAnalogRead(pins.bv2);
     doc["LogCount"] = (int)logger.logCount;
@@ -340,4 +279,64 @@ void loop() {
     }
     delay(1);
 }
+
+void readConfig() { 
+    JsonDocument doc;
+    deserializeJson(doc, configString.read());
+    config = doc["CONFIG"];
+}
+
+void printConfig() { 
+    JsonDocument d2;
+    string s;
+    d2["CONFIG"] = config;
+    serializeJson(d2, s);
+    Serial.println(s.c_str());
+}
+
+void saveConfig() { 
+    JsonDocument d2;
+    string s;
+    d2["CONFIG"] = config;
+    serializeJson(d2, s);
+    configString = s;
+}
+
+void deepSleep(int ms) { 
+    OUT("%09.3f DEEP SLEEP for %dms", millis() / 1000.0, ms);
+    esp_sleep_enable_timer_wakeup(1000LL * ms);
+    fflush(stdout);
+    uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
+    esp_deep_sleep_start();        
+}
+
+void lightSleep(int ms) { 
+    OUT("%09.3f LIGHT SLEEP for %dms", millis() / 1000.0, ms);
+    esp_sleep_enable_timer_wakeup(ms * 1000L);
+    fflush(stdout);
+    uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
+    esp_light_sleep_start();
+}
+
+bool wifiConnect() { 
+    OUT("connecting"); 
+    j.jw.enabled = true;
+    j.mqtt.active = false;
+    j.jw.onConnect([](){});
+    j.jw.autoConnect();
+    for(int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) { 
+        delay(1000);
+        wdtReset();
+    }
+    OUT("Connected to AP '%s' in %dms, IP=%s, channel=%d, RSSI=%d\n",
+        WiFi.SSID().c_str(), millis(), WiFi.localIP().toString().c_str(), WiFi.channel(), WiFi.RSSI());
+    return WiFi.status() == WL_CONNECTED;
+}
+
+void wifiDisconnect() { 
+    WiFi.disconnect();
+    WiFi.mode(WIFI_OFF);
+    j.jw.enabled = false;
+}
+
 
