@@ -231,9 +231,9 @@ void setup() {
     ls.ledcLightSleepSetup(pins.pwm, LEDC_CHANNEL_2);
     readConfig();
     printConfig();
-    OUT("RESET REASON: %s", reset_reason_string(rtc_get_reset_reason(0)));
-    if (rtc_get_reset_reason(0) == 1) 
-        forcePost = true;
+    //OUT("RESET REASON: %s", reset_reason_string(rtc_get_reset_reason(0)));
+    //if (rtc_get_reset_reason(0) == 1) 
+    //    forcePost = true;
 }
 
 int pwm = 1;
