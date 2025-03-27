@@ -1,8 +1,8 @@
 #!/bin/bash
-PORT=/dev/ttyUSB0
-BOARD=esp32
-#BOARD_OPTS=PartitionScheme=huge_app,CDCOnBoot=cdc 
-BOARD_OPTS=PartitionScheme=huge_app
+PORT=/dev/ttyACM0
+BOARD=esp32c3
+BOARD_OPTS=PartitionScheme=huge_app,CDCOnBoot=cdc 
+#BOARD_OPTS=PartitionScheme=huge_app
 
 cd "`dirname $0`"
 SKETCH="`basename \`pwd\``"

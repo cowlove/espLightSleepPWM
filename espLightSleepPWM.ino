@@ -307,6 +307,8 @@ void loop() {
         float fanPwm = config.pid.calc(vpd);
         
         JsonDocument doc;
+        doc["MAC"] = getMacAddress().c_str();
+        doc["PROGRAM"] = basename_strip_ext(__BASE_FILE__).c_str();
         doc["PWM"] = fanPwm; 
         doc["CONFIG"] = config;
         doc["LogCount"] = (int)logger.logCount;
