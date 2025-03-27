@@ -4,13 +4,17 @@ BOARD=esp32c3
 BOARD_OPTS=PartitionScheme=huge_app,CDCOnBoot=cdc 
 #BOARD_OPTS=PartitionScheme=huge_app
 
+GIT_VERSION=`git describe --abbrev=6 --dirty --always --tags`
+
 cd "`dirname $0`"
 SKETCH="`basename \`pwd\``"
 BUILDDIR="/tmp/arduino/${SKETCH}/${BOARD}"
 TMP="${BUILDDIR}/$$.txt"
 mkdir -p "${BUILDDIR}"
 arduino-cli compile -e -v -b esp32:esp32:${BOARD} --build-path ${BUILDDIR} \
-  --board-options ${BOARD_OPTS} -u -p ${PORT}\
+  --board-options ${BOARD_OPTS} \
+  --build-property compiler.cpp.extra_flags="-DGIT_VERSION=\"${GIT_VERSION}\"" \
+   -u -p ${PORT}\
 	 | tee "$TMP"
 
 ls /tmp/arduino/sketches && BASEDIR=/tmp/arduino/sketches
