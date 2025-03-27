@@ -10,11 +10,10 @@ else
 	BUILD_EXTRA_FLAGS += -DI2S
 endif
 
-#GIT_VERSION := "$(shell git describe --abbrev=4 --dirty --always --tags)"
+GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always --tags)"
 BUILD_EXTRA_FLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
-BUILD_EXTRA_FLAGS += -DESP32CORE_V2
-include ${HOME}/Arduino/libraries/makeEspArduino/makeEspArduino.mk
 
+include ${HOME}/Arduino/libraries/makeEspArduino/makeEspArduino.mk
 
 .PHONY: ${MAIN_NAME}_csim
 

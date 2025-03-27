@@ -95,7 +95,7 @@ public:
     SPIFFSVariable<float> reportTime = SPIFFSVariable<float>("/reportTime", 60);
     DeepSleepElapsedTime reportTimer;
     string url;
-    const char *TSLP = "TSLP";
+    const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
     SleepyLogger(const char *u) : url(u) {
         if (reportTimer.elapsed() < 1000) 
             reportTimer.reset();
@@ -132,7 +132,7 @@ public:
                 JsonDocument doc;
                 DeserializationError error = deserializeJson(doc, reportLog.read()[i]);
                 if (!error && doc[TSLP].as<int>() != 0) {
-                    doc["LogTimeOffsetSec"] = (reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0;
+                    doc["LTO"] = (reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0;
                     string s;
                     serializeJson(doc, s);
                     if (i != 0) post += ",";
@@ -142,6 +142,7 @@ public:
             post += "]}";
             post = floatRemoveTrailingZeros(post);
 
+            // reserialize the digest and remove TSLP values 
             JsonDocument tmp;
             DeserializationError error = deserializeJson(tmp, post);
             JsonArray a = tmp["LOG"].as<JsonArray>();
@@ -164,11 +165,8 @@ public:
             }
 
             vector<string> logs = reportLog;
-            OUT("log size before erasing %d items %d", i, (int)logs.size());
             logs.erase(logs.begin(), logs.begin() + i);
-            OUT("log size after erase %d", (int)logs.size());
             reportLog = logs;
-            OUT("log disk size after erase %d", (int)reportLog.read().size());
         }
         client.end();
         wifiDisconnect();
@@ -197,7 +195,7 @@ public:
 
 class SimplePID { 
 public:
-    float pgain = 1, igain = 1, dgain = 1, fgain = 10;
+    float pgain = 1, igain = 1, dgain = 1, fgain = 10, maxI = 10;
     float lastError = -1, iSum = 0;
     bool operator ==(const SimplePID &b) { 
         return memcmp((void *)this, (void *)&b, sizeof(*this)) == 0;
@@ -210,14 +208,14 @@ public:
      }
     bool convertToJson(JsonVariant dst) const { 
         char buf[128];
-        snprintf(buf, sizeof(buf), "P=%f I=%f D=%f F=%f L=%f S=%f", 
-            pgain, igain, dgain, fgain, lastError, iSum);
+        snprintf(buf, sizeof(buf), "P=%f I=%f D=%f F=%f L=%f S=%f MI=%f", 
+            pgain, igain, dgain, fgain, lastError, iSum, maxI);
         return dst.set(buf);
     }
     void convertFromJson(JsonVariantConst src) { 
         if(src.as<const char *>() != NULL)
-            sscanf(src.as<const char *>(), "P=%f I=%f D=%f F=%f L=%f S=%f", 
-                &pgain, &igain, &dgain, &fgain, &lastError, &iSum);
+            sscanf(src.as<const char *>(), "P=%f I=%f D=%f F=%f L=%f S=%f MI=%f", 
+                &pgain, &igain, &dgain, &fgain, &lastError, &iSum, &maxI);
     }
 };
 
