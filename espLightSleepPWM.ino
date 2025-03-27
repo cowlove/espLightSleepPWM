@@ -84,6 +84,7 @@ void saveConfig();
 void printConfig(); 
 void deepSleep(int ms);
 void lightSleep(int ms);
+string floatRemoveTrailingZeros(string &);
 
 // TODO: avoid repeated connection attempts
 class SleepyLogger { 
@@ -94,7 +95,7 @@ public:
     SPIFFSVariable<float> reportTime = SPIFFSVariable<float>("/reportTime", 60);
     DeepSleepElapsedTime reportTimer;
     string url;
-
+    const char *TSLP = "TSLP";
     SleepyLogger(const char *u) : url(u) {
         if (reportTimer.elapsed() < 1000) 
             reportTimer.reset();
@@ -113,6 +114,13 @@ public:
         OUT("http.begin() returned %d", r);
         client.addHeader("Content-Type", "application/json");
         
+        adminDoc["GIT"] = GIT_VERSION;
+        adminDoc["MAC"] = getMacAddress().c_str(); 
+        adminDoc["SSID"] = WiFi.SSID().c_str();
+        adminDoc["IP"] =  WiFi.localIP().toString().c_str(); 
+        adminDoc["RSSI"] = WiFi.RSSI();
+        adminDoc["ARCH"] = ARDUINO_VARIANT;
+
         bool fail = false;
         while(reportLog.read().size() > 0) {
             string admin, data, post;
@@ -123,8 +131,8 @@ public:
             for(i = 0; i < reportLog.read().size() && i < 10; i++) { 
                 JsonDocument doc;
                 DeserializationError error = deserializeJson(doc, reportLog.read()[i]);
-                if (!error && doc["TSL"].as<int>() != 0) {
-                    doc["LogTimeOffsetSec"] = (reportTimer.elapsed() - doc["TSL"].as<int>()) / 1000.0;
+                if (!error && doc[TSLP].as<int>() != 0) {
+                    doc["LogTimeOffsetSec"] = (reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0;
                     string s;
                     serializeJson(doc, s);
                     if (i != 0) post += ",";
@@ -132,6 +140,13 @@ public:
                 } 
             }
             post += "]}";
+            post = floatRemoveTrailingZeros(post);
+
+            JsonDocument tmp;
+            DeserializationError error = deserializeJson(tmp, post);
+            JsonArray a = tmp["LOG"].as<JsonArray>();
+            for(JsonVariant v : a) v.remove(TSLP);
+            serializeJson(tmp, post);
 
             for(int retry = 0; retry < 5; retry ++) {
                 wdtReset(); 
@@ -167,7 +182,7 @@ public:
     JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
         JsonDocument result; 
         logCount = logCount + 1;
-        doc["TSL"] = reportTimer.elapsed();
+        doc[TSLP] = reportTimer.elapsed();
         string s;
         serializeJson(doc, s);    
         vector<string> logs = reportLog;
@@ -252,7 +267,7 @@ void setup() {
     readConfig();
     printConfig();
     OUT("quick reboots: %d", j.quickRebootCounter.reboots());
-    if (j.quickRebootCounter.reboots() > 2) 
+    if (j.quickRebootCounter.reboots() > 2 || getResetReason(0) == 1) 
         forcePost = true;
     OUT("RESET REASON: %s", reset_reason_string(getResetReason()));
 }
@@ -283,7 +298,7 @@ void readSensors(JsonDocument &doc) {
     }
     doc["Temp"] = temp; 
     doc["Hum"] = hum;
-    doc["TempAgeSec"] = ambientTempSensor1.temp.getAgeMs() / 1000.0;
+    //doc["TempAgeSec"] = ambientTempSensor1.temp.getAgeMs() / 1000.0;
 }
 
 int pwm = 1;
@@ -313,7 +328,7 @@ void loop() {
     }
     int sleepMs = sensorServer.getSleepRequest() * 1000;
     if (alreadyLogged == false && 
-        ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0)) {
+        ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0 || forcePost)) {
         alreadyLogged = true;     
         ls.ledcLightSleepSet(pwm);
         pinMode(pins.power, OUTPUT);
@@ -325,7 +340,7 @@ void loop() {
         
         JsonDocument doc, adminDoc;
         adminDoc["MAC"] = getMacAddress().c_str();
-        adminDoc["PROGRAM"] = basename_strip_ext(__BASE_FILE__).c_str();
+        adminDoc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
         adminDoc["CONFIG"] = config;
         adminDoc["LogCount"] = (int)logger.logCount;
         adminDoc["PostCount"] = (int)logger.reportCount;
@@ -421,4 +436,9 @@ void wifiDisconnect() {
     j.jw.enabled = false;
 }
 
-
+string floatRemoveTrailingZeros(string &s) {
+    s = regex_replace(s, regex("[.]*[0]+ "), " ");
+    s = regex_replace(s, regex("[.]*[0]+\""), "\"");
+    s = regex_replace(s, regex("[.]*[0]+$"), "");
+    return s;
+}
