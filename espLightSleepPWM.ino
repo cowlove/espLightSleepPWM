@@ -103,7 +103,7 @@ public:
     void prepareSleep(int ms) {
         reportTimer.sleep(ms);
     }
-    JsonDocument post() {
+    JsonDocument post(JsonDocument adminDoc) {
         JsonDocument rval; 
         if (!wifiConnect())
             return rval;
@@ -114,32 +114,46 @@ public:
         client.addHeader("Content-Type", "application/json");
         
         bool fail = false;
-        while(reportLog.read().size() > 0) { 
-            JsonDocument doc;
-            DeserializationError error = deserializeJson(doc, reportLog.read()[0]);
+        while(reportLog.read().size() > 0) {
+            string admin, data, post;
+            serializeJson(adminDoc, admin);
+            post = "{\"ADMIN\":" + admin + ",\"LOG\":[";
 
-            if (!error && doc["TSL"].as<int>() != 0) {
-                doc["LogTimeOffsetSec"] = (reportTimer.elapsed() - doc["TSL"].as<int>()) / 1000.0;
-                string s;
-                serializeJson(doc, s);
-                Serial.printf("POST '%s'\n", s.c_str());
-                for(int retry = 0; retry < 5; retry ++) {
-                    wdtReset(); 
-                    r = client.POST(s.c_str());
-                    String resp =  client.getString();
-                    deserializeJson(rval, resp.c_str());
-                    OUT("http.POST returned %d: %s", r, resp.c_str());
-                    if (r == 200) 
-                        break;
-                }
-                if (r != 200) {  
-                    fail = true;
-                    break;
-                }
+            int i = 0;
+            for(i = 0; i < reportLog.read().size() && i < 10; i++) { 
+                JsonDocument doc;
+                DeserializationError error = deserializeJson(doc, reportLog.read()[i]);
+                if (!error && doc["TSL"].as<int>() != 0) {
+                    doc["LogTimeOffsetSec"] = (reportTimer.elapsed() - doc["TSL"].as<int>()) / 1000.0;
+                    string s;
+                    serializeJson(doc, s);
+                    if (i != 0) post += ",";
+                    post += s;
+                } 
             }
+            post += "]}";
+
+            for(int retry = 0; retry < 5; retry ++) {
+                wdtReset(); 
+                OUT("POST: %s", post.c_str());
+                r = client.POST(post.c_str());
+                String resp =  client.getString();
+                deserializeJson(rval, resp.c_str());
+                OUT("http.POST returned %d: %s", r, resp.c_str());
+                if (r == 200) 
+                    break;
+            }
+            if (r != 200) {  
+                fail = true;
+                break;
+            }
+
             vector<string> logs = reportLog;
-            logs.erase(logs.begin());
+            OUT("log size before erasing %d items %d", i, (int)logs.size());
+            logs.erase(logs.begin(), logs.begin() + i);
+            OUT("log size after erase %d", (int)logs.size());
             reportLog = logs;
+            OUT("log disk size after erase %d", (int)reportLog.read().size());
         }
         client.end();
         wifiDisconnect();
@@ -150,7 +164,7 @@ public:
         return rval;
     }
 
-    JsonDocument log(JsonDocument doc, bool forcePost = false) {
+    JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
         JsonDocument result; 
         logCount = logCount + 1;
         doc["TSL"] = reportTimer.elapsed();
@@ -160,7 +174,7 @@ public:
         logs.push_back(s);
         reportLog = logs;
         if (forcePost == true || reportTimer.elapsed() > reportTime * 60 * 1000)
-            result = post();
+            result = post(adminDoc);
         return result;
     }
 };
@@ -210,7 +224,7 @@ struct Config {
     } 
     void convertFromJson(JsonVariantConst src) { 
         pid = src["PID"];
-        sampleTime = src["SampleTime"] | 0.2;
+        sampleTime = src["SampleTime"] | 1.0;
         reportTime = src["reportTime"] | 3.0;
     }
     void applyNewConfig(const Config &c) { 
@@ -276,6 +290,9 @@ int pwm = 1;
 bool alreadyLogged = false;
 uint32_t wakeupTime = 0;
 
+
+// TODO: observed bug where too short of a sampleTime means it never gets to log or post
+
 void loop() {
     sensorServer.serverSleepSeconds = config.sampleTime * 60;
     sensorServer.serverSleepLinger = 30;
@@ -306,15 +323,16 @@ void loop() {
         float vpd = 0.0;
         float fanPwm = config.pid.calc(vpd);
         
-        JsonDocument doc;
-        doc["MAC"] = getMacAddress().c_str();
-        doc["PROGRAM"] = basename_strip_ext(__BASE_FILE__).c_str();
+        JsonDocument doc, adminDoc;
+        adminDoc["MAC"] = getMacAddress().c_str();
+        adminDoc["PROGRAM"] = basename_strip_ext(__BASE_FILE__).c_str();
+        adminDoc["CONFIG"] = config;
+        adminDoc["LogCount"] = (int)logger.logCount;
+        adminDoc["PostCount"] = (int)logger.reportCount;
+
         doc["PWM"] = fanPwm; 
-        doc["CONFIG"] = config;
-        doc["LogCount"] = (int)logger.logCount;
-        doc["PostCount"] = (int)logger.reportCount;
         readSensors(doc);
-        JsonDocument response = logger.log(doc, forcePost);
+        JsonDocument response = logger.log(doc, adminDoc, forcePost);
         forcePost = false;
 
         if (response["CONFIG"]) {
@@ -328,6 +346,7 @@ void loop() {
         // we should have slept, never got getSensorSleepRequest(), sensors must be missing
         // reset log timer
         wakeupTime = millis();
+        alreadyLogged = false;
     }
     if (sleepMs > 0) {
         sensorServer.prepareSleep(sleepMs); 
