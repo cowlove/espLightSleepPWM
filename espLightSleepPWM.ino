@@ -1,4 +1,5 @@
 #include "jimlib.h"
+#include "sensorNetworkEspNOW.h"
 
 #include <ArduinoJson.h>
 
@@ -225,7 +226,7 @@ struct Config {
 #ifdef CSIM
 const char *url = "http://localhost:8080/log";
 #else 
-const char *url = "http://vheavy.com/log";
+const char *url = "http://192.168.68.118:8080/log";
 #endif
 SleepyLogger logger(url);
 
@@ -237,54 +238,107 @@ void setup() {
     readConfig();
     printConfig();
     OUT("quick reboots: %d", j.quickRebootCounter.reboots());
-    if (j.quickRebootCounter.reboots() > 2) forcePost = true;
-    //OUT("RESET REASON: %s", reset_reason_string(rtc_get_reset_reason(0)));
-    //if (rtc_get_reset_reason(0) == 1) 
-    //    forcePost = true;
+    if (j.quickRebootCounter.reboots() > 2) 
+        forcePost = true;
+    OUT("RESET REASON: %s", reset_reason_string(getResetReason()));
+}
+
+class RemoteSensorModuleDHT : public RemoteSensorModule {
+    public:
+        RemoteSensorModuleDHT(const char *mac) : RemoteSensorModule(mac) {}
+        SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
+        SensorDHT temp = SensorDHT(this, "TEMP", 26);
+        SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
+        SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
+        SensorOutput led = SensorOutput(this, "LED", 22, 0);
+        SensorVariable v = SensorVariable(this, "RETRY", "X10");
+        SensorMillis m = SensorMillis(this);
+        ////} ambientTempSensor1("EC64C9986F2C");
+} ambientTempSensor1("auto");
+    
+RemoteSensorServer sensorServer({ &ambientTempSensor1 });
+
+void readSensors(JsonDocument &doc) { 
+    doc["Voltage1"] = avgAnalogRead(pins.bv1);
+    doc["Voltage2"] = avgAnalogRead(pins.bv2);
+    // TODO: handle stale data in Sensor::getXXX functions 
+    float temp = NAN, hum = NAN;
+    if (ambientTempSensor1.temp.getAgeMs() < sensorServer.serverSleepSeconds * 1000) {
+        temp = ambientTempSensor1.temp.getTemperature();
+        hum = ambientTempSensor1.temp.getHumidity();
+    }
+    doc["Temp"] = temp; 
+    doc["Hum"] = hum;
+    doc["TempAgeSec"] = ambientTempSensor1.temp.getAgeMs() / 1000.0;
 }
 
 int pwm = 1;
-void loop() {
-    j.run();
-    OUT("%09.3f logq %d, %d since post, free heap %d",
-        millis() / 1000.0,  (int)logger.reportLog.read().size(), 
-        (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
+bool alreadyLogged = false;
+uint32_t wakeupTime = 0;
 
+void loop() {
+    sensorServer.serverSleepSeconds = config.sampleTime * 60;
+    sensorServer.serverSleepLinger = 30;
+    int sensorWaitSec = 30;
     logger.reportTime = config.reportTime;
 
-    ls.ledcLightSleepSet(pwm);
-    pinMode(pins.power, OUTPUT);
-    digitalWrite(pins.power, 1);
-    pwm = (pwm + 5) % 64;
-    
-    float vpd = 0.0;
-    float fanPwm = config.pid.calc(vpd);
-    
-    JsonDocument doc;
-    doc["PWM"] = fanPwm; 
-    doc["CONFIG"] = config;
-    doc["VPD"] = vpd;
-    doc["Voltage1"] = avgAnalogRead(pins.bv1);
-    doc["Voltage2"] = avgAnalogRead(pins.bv2);
-    doc["LogCount"] = (int)logger.logCount;
-    doc["PostCount"] = (int)logger.reportCount;
-    JsonDocument response = logger.log(doc, forcePost);
-    forcePost = false;
-    //OUT("post [status] = %d", response["status"].as<int>());
+    j.run();
+    sensorServer.run();
+    if (!j.secTick(1)) { 
+        delay(1);
+        return;
+    }   
 
-    if (response["CONFIG"]) 
-        config.applyNewConfig(response["CONFIG"]);
-
-    saveConfig();
-    int sleepMs = config.sampleTime * 60 * 1000;
-    if (false && j.secTick(60)) {
-        logger.prepareSleep(sleepMs);
-        deepSleep(sleepMs); 
-        /*not reached*/
-    } else {
-        lightSleep(sleepMs);
+    if (j.secTick(10)) { 
+        OUT("%09.3f logq %d, %d since post, free heap %d",
+            millis() / 1000.0,  (int)logger.reportLog.read().size(), 
+            (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
     }
-    delay(1);
+    int sleepMs = sensorServer.getSleepRequest() * 1000;
+    if (alreadyLogged == false && 
+        ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0)) {
+        alreadyLogged = true;     
+        ls.ledcLightSleepSet(pwm);
+        pinMode(pins.power, OUTPUT);
+        digitalWrite(pins.power, 1);
+        pwm = (pwm + 5) % 64;
+        
+        float vpd = 0.0;
+        float fanPwm = config.pid.calc(vpd);
+        
+        JsonDocument doc;
+        doc["PWM"] = fanPwm; 
+        doc["CONFIG"] = config;
+        doc["LogCount"] = (int)logger.logCount;
+        doc["PostCount"] = (int)logger.reportCount;
+        readSensors(doc);
+        JsonDocument response = logger.log(doc, forcePost);
+        forcePost = false;
+
+        if (response["CONFIG"]) {
+            config.applyNewConfig(response["CONFIG"]);
+            saveConfig();
+        }
+        OUT("%09.3f LOGGED DATA logq %d", millis() / 1000.0, (int)logger.reportLog.read().size());
+    }
+    
+    if (millis() - wakeupTime > sensorServer.serverSleepSeconds * 1000) { 
+        // we should have slept, never got getSensorSleepRequest(), sensors must be missing
+        // reset log timer
+        wakeupTime = millis();
+    }
+    if (sleepMs > 0) {
+        sensorServer.prepareSleep(sleepMs); 
+        if (millis() > 8 * 60 * 1000) {
+            logger.prepareSleep(sleepMs);
+            deepSleep(sleepMs); 
+            /* reboots */
+        } else { 
+            lightSleep(sleepMs);
+            alreadyLogged = false;
+            wakeupTime = millis();
+        }
+    }
 }
 
 void readConfig() { 
