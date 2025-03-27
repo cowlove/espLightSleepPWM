@@ -202,6 +202,7 @@ public:
     }
     float calc(float err) {
         iSum += err;
+        iSum = max(-maxI, min(maxI, iSum));
         float rval = pgain * err + igain * iSum + dgain * (lastError - err);
         lastError = err;
         return rval; 
