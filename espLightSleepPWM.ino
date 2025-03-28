@@ -15,10 +15,13 @@ using std::vector;
 JStuff j;
 
 struct {
-    int bv1 = 0;
+    int dhtGnd = 5;
+    int dhtData = 6;
+    int dhtVcc = 7;
+    int bv1 = 3;
     int bv2 = 0;
-    int pwm = 27;
     int power = 2;
+    int pwm = 8;
 } pins;
 
 SPIFFSVariable<string> configString("/configString3", "");
@@ -86,6 +89,10 @@ void deepSleep(int ms);
 void lightSleep(int ms);
 string floatRemoveTrailingZeros(string &);
 
+float round(float f, float prec) { 
+    return floor(f / prec + .5) * prec;
+}
+
 // TODO: avoid repeated connection attempts
 class SleepyLogger { 
 public:
@@ -132,7 +139,7 @@ public:
                 JsonDocument doc;
                 DeserializationError error = deserializeJson(doc, reportLog.read()[i]);
                 if (!error && doc[TSLP].as<int>() != 0) {
-                    doc["LTO"] = (reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0;
+                    doc["LTO"] = round((reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0, .1);
                     string s;
                     serializeJson(doc, s);
                     if (i != 0) post += ",";
@@ -257,9 +264,17 @@ const char *url = "http://localhost:8080/log";
 const char *url = "http://192.168.68.118:8080/log";
 #endif
 SleepyLogger logger(url);
-
+DHT *dht1 = NULL;
 bool forcePost = false;
 void setup() {
+    pinMode(pins.dhtGnd, OUTPUT);
+    digitalWrite(pins.dhtGnd, 0);
+    pinMode(pins.dhtVcc, OUTPUT);
+    digitalWrite(pins.dhtVcc, 1);
+
+    dht1 = new DHT(pins.dhtData, DHT22);
+    dht1->begin();
+
     j.begin();
     j.jw.enabled = j.mqtt.active = false;
     ls.ledcLightSleepSetup(pins.pwm, LEDC_CHANNEL_2);
@@ -273,30 +288,48 @@ void setup() {
 
 class RemoteSensorModuleDHT : public RemoteSensorModule {
     public:
-        RemoteSensorModuleDHT(const char *mac) : RemoteSensorModule(mac) {}
-        SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
-        SensorDHT temp = SensorDHT(this, "TEMP", 26);
-        SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
-        SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
-        SensorOutput led = SensorOutput(this, "LED", 22, 0);
-        SensorVariable v = SensorVariable(this, "RETRY", "X10");
-        SensorMillis m = SensorMillis(this);
-        ////} ambientTempSensor1("EC64C9986F2C");
+    RemoteSensorModuleDHT(const char *mac) : RemoteSensorModule(mac) {}
+    SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
+    SensorDHT temp = SensorDHT(this, "TEMP", 26);
+    SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
+    SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
+    SensorOutput led = SensorOutput(this, "LED", 22, 0);
+    SensorMillis m = SensorMillis(this);
+    bool convertToJson(JsonVariant dst) const {
+        dst["temp"] = temp.getTemperature();
+        dst["hum"] = temp.getHumidity();
+        //dst["age"] = temp.getAgeMs();
+        dst["bat"] = round(battery.asFloat(), .01);
+        return true;
+    } 
 } ambientTempSensor1("auto");
-    
+
 RemoteSensorServer sensorServer({ &ambientTempSensor1 });
 
-void readSensors(JsonDocument &doc) { 
-    doc["Voltage1"] = avgAnalogRead(pins.bv1);
-    doc["Voltage2"] = avgAnalogRead(pins.bv2);
-    // TODO: handle stale data in Sensor::getXXX functions 
-    float temp = NAN, hum = NAN;
-    if (ambientTempSensor1.temp.getAgeMs() < sensorServer.serverSleepSeconds * 1000) {
-        temp = ambientTempSensor1.temp.getTemperature();
-        hum = ambientTempSensor1.temp.getHumidity();
+void readDht(DHT *dht, float *t, float *h) {
+    *t = *h = NAN;
+    for(int retries = 0; retries < 10; retries++) {
+        *t = dht->readTemperature();
+        *h = dht->readHumidity();
+        if (!isnan(*h) && !isnan(*t)) 
+            break;
+        retries++;
+        OUT("DHT read failure");
+        j.run();
+        delay(500);
     }
-    doc["Temp"] = temp; 
-    doc["Hum"] = hum;
+}
+
+void readSensors(JsonDocument &doc) { 
+    doc["Voltage1"] = round(avgAnalogRead(pins.bv1), .1);
+    doc["Voltage2"] = round(avgAnalogRead(pins.bv2), .1);
+    // TODO: handle stale data in Sensor::getXXX functions 
+    doc["RDHT1"] = ambientTempSensor1;
+
+    float temp = NAN, hum = NAN;
+    readDht(dht1, &temp, &hum);
+    doc["LT1_Temp"] = temp;
+    doc["LT2_Hum"] = hum;
     //doc["TempAgeSec"] = ambientTempSensor1.temp.getAgeMs() / 1000.0;
 }
 
