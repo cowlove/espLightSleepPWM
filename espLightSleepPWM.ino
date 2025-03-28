@@ -15,12 +15,12 @@ using std::vector;
 JStuff j;
 
 struct {
-    int dhtGnd = 5;
+    int dhtGnd = 5; // TMP
     int dhtData1 = 6;
-    int dhtVcc = 7;
-    int bv1 = 3;
-    int bv2 = 0; // TODO
-    int fanPower = 9;
+    int dhtVcc = 7; // TMP
+    int bv1 = 2;
+    int bv2 = 3; 
+    int power = 9;
     int fanPwm = 8;
     int dhtData2 = 0; // TODO
     int dhtData3 = 0; // TODO 
@@ -230,12 +230,6 @@ public:
     }
 };
 
-template <class T>
-bool convertToJson(const T &p, JsonVariant dst) { return p.convertToJson(dst); }
-
-template <class T>
-void convertFromJson(JsonVariantConst src, T &p) { p.convertFromJson(src); }
-
 struct Config {
     SimplePID pid;
     float sampleTime;
@@ -289,7 +283,7 @@ void setup() {
 }
 
 class RemoteSensorModuleDHT : public RemoteSensorModule {
-    public:
+public:
     RemoteSensorModuleDHT(const char *mac) : RemoteSensorModule(mac) {}
     SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
     SensorDHT temp = SensorDHT(this, "TEMP", 26);
@@ -300,6 +294,21 @@ class RemoteSensorModuleDHT : public RemoteSensorModule {
 } ambientTempSensor1("auto");
 
 RemoteSensorServer sensorServer({ &ambientTempSensor1 });
+
+bool convertToJson(const RemoteSensorModuleDHT &t, JsonVariant dst) {
+    dst["temp"] = t.temp.getTemperature();
+    dst["hum"] = t.temp.getHumidity();
+    //dst["age"] = t.temp.getAgeMs();
+    dst["bat"] = round(t.battery.asFloat(), .01);
+    return true;
+} 
+template <class T>
+bool convertToJson(const T &p, JsonVariant dst) { return p.convertToJson(dst); }
+
+template <class T>
+void convertFromJson(JsonVariantConst src, T &p) { p.convertFromJson(src); }
+
+
 
 void readDht(DHT *dht, float *t, float *h) {
     *t = *h = NAN;
@@ -315,13 +324,7 @@ void readDht(DHT *dht, float *t, float *h) {
     }
 }
 
-bool convertToJson(const RemoteSensorModuleDHT &t, JsonVariant dst) {
-    dst["temp"] = t.temp.getTemperature();
-    dst["hum"] = t.temp.getHumidity();
-    //dst["age"] = t.temp.getAgeMs();
-    dst["bat"] = round(t.battery.asFloat(), .01);
-    return true;
-} 
+RemoteSensorModuleDHT x("auto");
 
 bool convertToJson(const DHT &dht, JsonVariant dst) { 
     DHT *p = (DHT *)&dht;
@@ -335,9 +338,9 @@ void readSensors(JsonDocument &doc) {
     // TODO: handle stale data in Sensor::getXXX functions 
     doc["bv1"] = round(avgAnalogRead(pins.bv1), .1);
     doc["bv2"] = round(avgAnalogRead(pins.bv2), .1);
-    doc["fanPow"] = digitalRead(pins.fanPower);
-    doc["fanPwm"] = lsPwm.getDuty();
-    doc["RDHT1"] = ambientTempSensor1;
+    doc["power"] = digitalRead(pins.power);
+    doc["pwm"] = lsPwm.getDuty();
+    //doc["RDHT1"] = ambientTempSensor1;
     doc["LDHT1"] = *dht1;
 }
 
@@ -372,8 +375,8 @@ void loop() {
         alreadyLogged = true;     
 
         lsPwm.ledcLightSleepSet(pwm);
-        pinMode(pins.fanPower, OUTPUT);
-        digitalWrite(pins.fanPower, 1);
+        pinMode(pins.power, OUTPUT);
+        digitalWrite(pins.power, 1);
         pwm = (pwm + 5) % 64;
         
         float vpd = 0.0;

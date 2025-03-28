@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x 
 PORT=/dev/ttyACM0
 BOARD=esp32c3
 BOARD_OPTS=PartitionScheme=huge_app,CDCOnBoot=cdc 
@@ -11,7 +11,7 @@ SKETCH="`basename \`pwd\``"
 BUILDDIR="/tmp/arduino/${SKETCH}/${BOARD}"
 TMP="${BUILDDIR}/$$.txt"
 mkdir -p "${BUILDDIR}"
-arduino-cli compile -e -v -b esp32:esp32:${BOARD} --build-path ${BUILDDIR} \
+arduino-cli compile --clean -e -v -b esp32:esp32:${BOARD} --build-path ${BUILDDIR} \
   --board-options ${BOARD_OPTS} \
   --build-property compiler.cpp.extra_flags="-DGIT_VERSION=\"${GIT_VERSION}\"" \
    -u -p ${PORT}\
