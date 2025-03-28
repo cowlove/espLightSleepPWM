@@ -16,12 +16,14 @@ JStuff j;
 
 struct {
     int dhtGnd = 5;
-    int dhtData = 6;
+    int dhtData1 = 6;
     int dhtVcc = 7;
     int bv1 = 3;
-    int bv2 = 0;
-    int power = 2;
-    int pwm = 8;
+    int bv2 = 0; // TODO
+    int fanPower = 9;
+    int fanPwm = 8;
+    int dhtData2 = 0; // TODO
+    int dhtData3 = 0; // TODO 
 } pins;
 
 SPIFFSVariable<string> configString("/configString3", "");
@@ -68,8 +70,9 @@ struct LightSleepPWM {
         //printf("Frequency %u Hz duty %d\n", 
         //    ledc_get//_freq(LEDC_LS_MODE, LEDC_LS_TIMER),
         //    ledc_get_duty(LEDC_LS_MODE, chan));
-    }    
-} ls;
+    }
+    int getDuty() { return ledc_get_duty(LEDC_LS_MODE, chan); }     
+} lsPwm;
 
 class DeepSleepElapsedTime {
     SPIFFSVariable<int> bootStartMs = SPIFFSVariable<int>("/deepSleepElapsedTime", 0);
@@ -139,7 +142,7 @@ public:
                 JsonDocument doc;
                 DeserializationError error = deserializeJson(doc, reportLog.read()[i]);
                 if (!error && doc[TSLP].as<int>() != 0) {
-                    doc["LTO"] = round((reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0, .1);
+                    doc["LTO"] = round((reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0, .1)  ;
                     string s;
                     serializeJson(doc, s);
                     if (i != 0) post += ",";
@@ -256,13 +259,12 @@ struct Config {
     }
 } config;
 
-
-
 #ifdef CSIM
 const char *url = "http://localhost:8080/log";
 #else 
 const char *url = "http://192.168.68.118:8080/log";
 #endif
+
 SleepyLogger logger(url);
 DHT *dht1 = NULL;
 bool forcePost = false;
@@ -272,12 +274,12 @@ void setup() {
     pinMode(pins.dhtVcc, OUTPUT);
     digitalWrite(pins.dhtVcc, 1);
 
-    dht1 = new DHT(pins.dhtData, DHT22);
+    dht1 = new DHT(pins.dhtData1, DHT22);
     dht1->begin();
 
     j.begin();
     j.jw.enabled = j.mqtt.active = false;
-    ls.ledcLightSleepSetup(pins.pwm, LEDC_CHANNEL_2);
+    lsPwm.ledcLightSleepSetup(pins.fanPwm, LEDC_CHANNEL_2);
     readConfig();
     printConfig();
     OUT("quick reboots: %d", j.quickRebootCounter.reboots());
@@ -295,13 +297,6 @@ class RemoteSensorModuleDHT : public RemoteSensorModule {
     SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
     SensorOutput led = SensorOutput(this, "LED", 22, 0);
     SensorMillis m = SensorMillis(this);
-    bool convertToJson(JsonVariant dst) const {
-        dst["temp"] = temp.getTemperature();
-        dst["hum"] = temp.getHumidity();
-        //dst["age"] = temp.getAgeMs();
-        dst["bat"] = round(battery.asFloat(), .01);
-        return true;
-    } 
 } ambientTempSensor1("auto");
 
 RemoteSensorServer sensorServer({ &ambientTempSensor1 });
@@ -320,17 +315,30 @@ void readDht(DHT *dht, float *t, float *h) {
     }
 }
 
-void readSensors(JsonDocument &doc) { 
-    doc["Voltage1"] = round(avgAnalogRead(pins.bv1), .1);
-    doc["Voltage2"] = round(avgAnalogRead(pins.bv2), .1);
-    // TODO: handle stale data in Sensor::getXXX functions 
-    doc["RDHT1"] = ambientTempSensor1;
+bool convertToJson(const RemoteSensorModuleDHT &t, JsonVariant dst) {
+    dst["temp"] = t.temp.getTemperature();
+    dst["hum"] = t.temp.getHumidity();
+    //dst["age"] = t.temp.getAgeMs();
+    dst["bat"] = round(t.battery.asFloat(), .01);
+    return true;
+} 
 
-    float temp = NAN, hum = NAN;
-    readDht(dht1, &temp, &hum);
-    doc["LT1_Temp"] = temp;
-    doc["LT2_Hum"] = hum;
-    //doc["TempAgeSec"] = ambientTempSensor1.temp.getAgeMs() / 1000.0;
+bool convertToJson(const DHT &dht, JsonVariant dst) { 
+    DHT *p = (DHT *)&dht;
+    dst["temp"] = p->readTemperature();
+    dst["hum"] = p->readHumidity();
+    return true;
+}
+
+
+void readSensors(JsonDocument &doc) { 
+    // TODO: handle stale data in Sensor::getXXX functions 
+    doc["bv1"] = round(avgAnalogRead(pins.bv1), .1);
+    doc["bv2"] = round(avgAnalogRead(pins.bv2), .1);
+    doc["fanPow"] = digitalRead(pins.fanPower);
+    doc["fanPwm"] = lsPwm.getDuty();
+    doc["RDHT1"] = ambientTempSensor1;
+    doc["LDHT1"] = *dht1;
 }
 
 int pwm = 1;
@@ -362,9 +370,10 @@ void loop() {
     if (alreadyLogged == false && 
         ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0 || forcePost)) {
         alreadyLogged = true;     
-        ls.ledcLightSleepSet(pwm);
-        pinMode(pins.power, OUTPUT);
-        digitalWrite(pins.power, 1);
+
+        lsPwm.ledcLightSleepSet(pwm);
+        pinMode(pins.fanPower, OUTPUT);
+        digitalWrite(pins.fanPower, 1);
         pwm = (pwm + 5) % 64;
         
         float vpd = 0.0;
@@ -377,7 +386,7 @@ void loop() {
         adminDoc["LogCount"] = (int)logger.logCount;
         adminDoc["PostCount"] = (int)logger.reportCount;
 
-        doc["PWM"] = fanPwm; 
+        doc["fanPwm"] = fanPwm; 
         readSensors(doc);
         JsonDocument response = logger.log(doc, adminDoc, forcePost);
         forcePost = false;
