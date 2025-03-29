@@ -119,7 +119,7 @@ public:
     void prepareSleep(int ms) {
         reportTimer.sleep(ms);
     }
-    JsonDocument post(const string &url, JsonDocument adminDoc) {
+    JsonDocument post(JsonDocument adminDoc) {
         JsonDocument rval; 
         if (!wifiConnect())
             return rval;
@@ -132,6 +132,7 @@ public:
         adminDoc["ARCH"] = ARDUINO_VARIANT;
 
         HTTPClient client;
+        const string url = getServerName() + "/log";
         int r = client.begin(url.c_str());
         OUT("http.begin() returned %d", r);
         client.addHeader("Content-Type", "application/json");
@@ -211,7 +212,7 @@ public:
         return rval;
     }
 
-    JsonDocument log(const string &url, JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
+    JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
         JsonDocument result; 
         logCount = logCount + 1;
         doc[TSLP] = reportTimer.elapsed();
@@ -223,7 +224,7 @@ public:
             logs.erase(logs.begin());
         reportLog = logs;
         if (forcePost == true || reportTimer.elapsed() > reportTime * 60 * 1000)
-            result = post(url, adminDoc);
+            result = post(adminDoc);
         
         return result;
     }
@@ -472,8 +473,7 @@ void loop() {
         doc["fanPwm"] = pwm; 
         doc["VPD"] = round(vpd, .01);;
         readSensors(doc);
-        const string url = getServerName() + "/log";
-        JsonDocument response = logger.log(url, doc, adminDoc, forcePost);
+        JsonDocument response = logger.log(doc, adminDoc, forcePost);
         forcePost = false;
 
         if (response["CONFIG"]) {
@@ -483,7 +483,7 @@ void loop() {
         OUT("%09.3f LOGGED DATA logq %d", millis() / 1000.0, (int)logger.reportLog.read().size());
     }
     
-    if (millis() - wakeupTime > sensorServer.serverSleepSeconds * 1000) { 
+    if (alreadyLogged == true && millis() - wakeupTime > sensorServer.serverSleepSeconds * 1000) { 
         // we should have slept, never got getSensorSleepRequest(), sensors must be missing
         // reset log timer
         wakeupTime = millis();
