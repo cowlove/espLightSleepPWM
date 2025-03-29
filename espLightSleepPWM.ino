@@ -264,20 +264,23 @@ struct Config {
     float reportTime;
     float vpdSetPoint;
     float minBatVolt;
+    int maxFan;
     bool convertToJson(JsonVariant dst) const {
         dst["PID"] = pid;
-        dst["SampleTime"] = sampleTime;
+        dst["sampleTime"] = sampleTime;
         dst["reportTime"] = reportTime;
         dst["vpdSetPoint"] = vpdSetPoint;
         dst["minBatVolt"] = minBatVolt;
+        dst["maxFan"] = maxFan;
         return true;
     } 
     void convertFromJson(JsonVariantConst src) { 
         pid = src["PID"];
         vpdSetPoint = src["vpdSetPoint"] | 3.6;
-        sampleTime = src["SampleTime"] | 1.0;
+        sampleTime = src["sampleTime"] | 1.0;
         reportTime = src["reportTime"] | 3.0;
         minBatVolt = src["minBatVolt"] | 1190;
+        maxFan = src["maxFan"] | 20;
     }
     void applyNewConfig(const Config &c) { 
         const Config old = *this;
@@ -414,7 +417,7 @@ int pwm = 0;
 // TODO: observed bug where too short of a sampleTime means it never gets to log or post
 
 int setFan(int pwm) { 
-    pwm = min(63, max(0, pwm));
+    pwm = min(config.maxFan, max(0, pwm));
     OUT("Turning on fan power level %d", pwm);
     if (pwm > 0) { 
         lsPwm.ledcLightSleepSet(pwm);
