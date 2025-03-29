@@ -354,13 +354,11 @@ bool convertToJson(const T &p, JsonVariant dst) { return p.convertToJson(dst); }
 template <class T>
 void convertFromJson(JsonVariantConst src, T &p) { p.convertFromJson(src); }
 
-
 float calcVpd(float t, float rh) { 
     float sp = 0.61078 * exp((17.27 * t) / (t + 237.3)) * 7.50062;
     float vpd = (100 - rh) / 100 * sp;
     return vpd;
 }
-
 
 void readDht(DHT *dht, float *t, float *h) {
     *t = *h = NAN;
@@ -369,7 +367,6 @@ void readDht(DHT *dht, float *t, float *h) {
     //yieldMs(100);
     digitalWrite(pins.dhtVcc, 1);
     //yieldMs(100);
-
     for(int retries = 0; retries < 10; retries++) {
         *h = dht->readHumidity();
         *t = dht->readTemperature();
@@ -412,7 +409,6 @@ void readSensors(JsonDocument &doc) {
 bool alreadyLogged = false;
 uint32_t wakeupTime = 0;
 int pwm = 0;
-
 
 // TODO: observed bug where too short of a sampleTime means it never gets to log or post
 
