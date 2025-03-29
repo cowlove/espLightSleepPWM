@@ -55,13 +55,13 @@ fi
 
 if [[ \$OPT == *u* ]]; then
 	echo Uploading... 
-	if [[ \$OPT == *w* ]]; then echo -n Waiting for ${PORT}...; while [ ! -e ${PORT} ]; do sleep 1; done; echo OK; fi;
+	if [[ \$OPT == *w* ]]; then echo -n Waiting for ${PORT}...; while [ ! -e ${PORT} ]; do sleep .01; done; echo OK; fi;
 	$UPLOAD_CMD 
 fi
 
 if [[ \$OPT == *m* ]]; then
 	echo Monitoring...
-	if [[ \$OPT == *w* ]]; then echo -n Waiting for ${PORT}...; while [ ! -e ${PORT} ]; do sleep 1; done; echo OK; fi;
+	if [[ \$OPT == *w* ]]; then echo -n Waiting for ${PORT}...; while [ ! -e ${PORT} ]; do sleep .01; done; echo OK; fi;
 	stty -F ${PORT} 115200 raw -echo && cat ${PORT}
 fi;
 

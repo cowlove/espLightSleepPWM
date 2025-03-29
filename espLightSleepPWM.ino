@@ -125,11 +125,6 @@ public:
         JsonDocument rval; 
         if (!wifiConnect())
             return rval;
-
-        HTTPClient client;
-        int r = client.begin(url.c_str());
-        OUT("http.begin() returned %d", r);
-        client.addHeader("Content-Type", "application/json");
         
         adminDoc["GIT"] = GIT_VERSION;
         adminDoc["MAC"] = getMacAddress().c_str(); 
@@ -137,6 +132,11 @@ public:
         adminDoc["IP"] =  WiFi.localIP().toString().c_str(); 
         adminDoc["RSSI"] = WiFi.RSSI();
         adminDoc["ARCH"] = ARDUINO_VARIANT;
+
+        HTTPClient client;
+        int r = client.begin(url.c_str());
+        OUT("http.begin() returned %d", r);
+        client.addHeader("Content-Type", "application/json");
 
         bool fail = false;
         while(reportLog.read().size() > 0) {
@@ -175,6 +175,10 @@ public:
                 OUT("http.POST returned %d: %s", r, resp.c_str());
                 if (r == 200) 
                     break;
+                client.end();
+                int beginRes = client.begin(url.c_str());
+                OUT("http.begin() returned %d", beginRes);
+                client.addHeader("Content-Type", "application/json");
             }
             if (r != 200) {  
                 fail = true;
@@ -284,11 +288,16 @@ SleepyLogger logger(url);
 DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 void setup() {
+    j.begin();
+    float bv1 = avgAnalogRead(pins.bv1);
+    if (bv1 > 1000 && bv1 < 2000) { 
+        printf("Battery too low %.1f sleeping 1 hour\n", bv1);
+        deepSleep(60 * 60 * 1000);
+    }
     pinMode(pins.dhtGnd, OUTPUT);
     digitalWrite(pins.dhtGnd, 0);
     pinMode(pins.dhtVcc, OUTPUT);
     digitalWrite(pins.dhtVcc, 1);
-
     dht1 = new DHT(pins.dhtData1, DHT22);
     dht2 = new DHT(pins.dhtData2, DHT22);
     dht3 = new DHT(pins.dhtData3, DHT22);
@@ -296,7 +305,6 @@ void setup() {
     dht2->begin();
     dht3->begin();
 
-    j.begin();
     j.jw.enabled = j.mqtt.active = false;
     lsPwm.ledcLightSleepSetup(pins.fanPwm, LEDC_CHANNEL_2);
     readConfig();
@@ -323,7 +331,7 @@ public:
         dst["bat"] = round(t.battery.asFloat(), .01);
         return true;
     } 
-} ambientTempSensor1("auto");
+} ambientTempSensor1("EC64C9986F2C");
 
 RemoteSensorServer sensorServer({ &ambientTempSensor1 });
 
@@ -408,10 +416,10 @@ void loop() {
     int sensorWaitSec = 30;
     logger.reportTime = config.reportTime;
     j.run();
-    if (millis() < 5000) {
-        delay(100);
-        return;
-    }
+    //if (millis() < 5000) {
+    //    delay(100);
+    //    return;
+    //}
     sensorServer.run();
 
     if (j.secTick(10)) { 
@@ -419,8 +427,7 @@ void loop() {
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
             (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
         OUT("RESET REASON: %d %s", getResetReason(0), reset_reason_string(getResetReason()));
-
-        
+  
         if (0) {
             JsonDocument d;
             readSensors(d);
@@ -450,6 +457,7 @@ void loop() {
             }
         } else { 
             pwm = 0;
+            digitalWrite(pins.power, 0);
         }
         
         JsonDocument doc, adminDoc;
@@ -480,8 +488,11 @@ void loop() {
     }
     sleepMs = sensorServer.getSleepRequest() * 1000 - 7000;
     if (sleepMs > 0) {
+        if (avgAnalogRead(pins.bv1) < 2200) { // charge up our LiPo this sleep
+            digitalWrite(pins.power, 1);
+        }
         sensorServer.prepareSleep(sleepMs); 
-        if (pwm == 0) {
+        if (pwm == 0 && digitalRead(pins.power) == 0) {
             logger.prepareSleep(sleepMs);
             deepSleep(sleepMs); 
             /* reboots */
@@ -491,7 +502,7 @@ void loop() {
             wakeupTime = millis();
         }
     }
-    delay(1);
+    delay(10);
 }
 
 void readConfig() { 

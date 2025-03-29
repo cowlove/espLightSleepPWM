@@ -1,0 +1,1 @@
+python3 "/home/jim/.arduino15/packages/esp32/tools/esptool_py/4.5.1/esptool.py" --chip esp32c3 -p /dev/ttyACM0 erase_flash
