@@ -9,6 +9,13 @@
 #include <HTTPClient.h>
 #endif
 
+#ifdef CSIM
+#define URL "http://192.168.68.118:8080"
+#else 
+#define URL "http://192.168.68.118:8080"
+#endif
+const char *url = URL "/log";
+
 using std::string;
 using std::vector;
 
@@ -193,7 +200,7 @@ public:
                 OUT("OTA version '%s', local version '%s', no upgrade needed", ota_ver, GIT_VERSION);
             } else { 
                 OUT("OTA version '%s', local version '%s', upgrading...", ota_ver, GIT_VERSION);
-                webUpgrade("http://192.168.68.118:8080/ota");
+                webUpgrade(URL "/ota");
             }       
         }
 
@@ -272,13 +279,6 @@ struct Config {
         pid.lastError = old.pid.lastError;
     }
 } config;
-
-
-#ifdef CSIM
-const char *url = "http://localhost:8080/log";
-#else 
-const char *url = "http://192.168.68.118:8080/log";
-#endif
 
 SleepyLogger logger(url);
 DHT *dht1, *dht2, *dht3;
@@ -415,7 +415,7 @@ void loop() {
     sensorServer.run();
 
     if (j.secTick(10)) { 
-        OUT("%09.3f logq %d, %d since post, free heap %d",
+        OUT("%09.3f XXXX logq %d, %d since post, free heap %d",
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
             (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
         OUT("RESET REASON: %d %s", getResetReason(0), reset_reason_string(getResetReason()));
@@ -434,7 +434,7 @@ void loop() {
     if (alreadyLogged == false && 
         ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0 || forcePost)) {
         alreadyLogged = true;     
-        OUT("Evaluating VPD and fan");
+        OUT("YYYY Evaluating VPD and fan");
         float vpd = getVpd(dht3);
         if (vpd > 0.0 && vpd < config.vpdSetPoint) {
             pwm = -config.pid.calc(vpd - config.vpdSetPoint);
