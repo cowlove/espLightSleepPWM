@@ -243,7 +243,7 @@ public:
         iSum = max(-maxI, min(maxI, iSum));
         float rval = pgain * err + igain * iSum + dgain * (lastError - err);
         lastError = err;
-        return rval; 
+        return rval * fgain; 
      }
     bool convertToJson(JsonVariant dst) const { 
         char buf[128];
@@ -362,10 +362,10 @@ float calcVpd(float t, float rh) {
 void readDht(DHT *dht, float *t, float *h) {
     *t = *h = NAN;
     wdtReset();
-    digitalWrite(pins.dhtVcc, 0);
-    yieldMs(500);
+    //digitalWrite(pins.dhtVcc, 0);
+    //yieldMs(100);
     digitalWrite(pins.dhtVcc, 1);
-    yieldMs(100);
+    //yieldMs(100);
 
     for(int retries = 0; retries < 10; retries++) {
         *h = dht->readHumidity();
@@ -373,7 +373,7 @@ void readDht(DHT *dht, float *t, float *h) {
         if (!isnan(*h) && !isnan(*t)) 
             break;
         retries++;
-        OUT("DHT read failure");
+        OUT("DHT read failure %lx", dht);
         wdtReset();
         yieldMs(500);
     }
@@ -413,7 +413,69 @@ int pwm = 0;
 
 // TODO: observed bug where too short of a sampleTime means it never gets to log or post
 
+int setFan(int pwm) { 
+    pwm = min(63, max(0, pwm));
+    OUT("Turning on fan power level %d", pwm);
+    if (pwm > 0) { 
+        lsPwm.ledcLightSleepSet(pwm);
+        pinMode(pins.power, OUTPUT);
+        digitalWrite(pins.power, 1);
+    } else { 
+        pwm = 0;
+        pinMode(pins.power, OUTPUT);
+        digitalWrite(pins.power, 0);
+        lsPwm.ledcLightSleepSet(pwm);
+    }
+    return pwm;
+}
+
+
+void testLoop() {
+    #if 0 
+    // trying to figure out light sleep gpio hold en
+    digitalWrite(GPIO_NUM_8, 1);
+    gpio_hold_en(GPIO_NUM_8);
+    delay(2000);
+    OUT("starting light sleep");
+
+    esp_sleep_enable_timer_wakeup(2000 * 1000L);
+    uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
+    gpio_hold_en(GPIO_NUM_8);
+    //rtc_gpio_hold_en(GPIO_NUM_8);
+    gpio_deep_sleep_hold_en();
+    esp_light_sleep_start();
+    OUT("ending light sleep");
+    wdtReset();
+    return;
+#endif
+    static int pwm = 5; 
+    j.jw.enabled = j.mqtt.active = true;
+    j.run();
+    if (j.secTick(1)) { 
+        if(WiFi.status() != WL_CONNECTED) { 
+            //wifiConnect();
+        }
+        OUT("RSSI: %d", WiFi.RSSI());
+        setFan(pwm);
+        pwm += 5;
+        if (pwm > 20) pwm = 0;
+        if (1) {
+            JsonDocument d;
+            readSensors(d);
+            string s;
+            serializeJson(d, s);
+            OUT("%s", s.c_str());
+        }
+    }
+}
+
+int testMode = 0;
 void loop() {
+#if 0
+    testLoop();
+    return;
+#endif
+
     sensorServer.serverSleepSeconds = config.sampleTime * 60;
     sensorServer.serverSleepLinger = 30;
     int sensorWaitSec = 30;
@@ -429,15 +491,7 @@ void loop() {
         OUT("%09.3f XXXX logq %d, %d since post, free heap %d",
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
             (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
-        OUT("RESET REASON: %d %s", getResetReason(0), reset_reason_string(getResetReason()));
-  
-        if (0) {
-            JsonDocument d;
-            readSensors(d);
-            string s;
-            serializeJson(d, s);
-            OUT("%s", s.c_str());
-        }
+        OUT("RESET REASON: %d %s", getResetReason(0), reset_reason_string(getResetReason()));  
     }
 
     int sleepMs = sensorServer.getSleepRequest() * 1000;
@@ -446,21 +500,11 @@ void loop() {
         alreadyLogged = true;     
         OUT("YYYY Evaluating VPD and fan");
         float vpd = getVpd(dht3);
-        if (vpd > 0.0 && vpd < config.vpdSetPoint) {
+        if (!isnan(vpd)) { 
             pwm = -config.pid.calc(vpd - config.vpdSetPoint);
-            pwm = min(63, max(0, pwm));
-            if (pwm > 0) { 
-                OUT("Turning on fan power level %d", pwm);
-                lsPwm.ledcLightSleepSet(pwm);
-                pinMode(pins.power, OUTPUT);
-                digitalWrite(pins.power, 1);
-            } else { 
-                digitalWrite(pins.power, 0);
-                lsPwm.ledcLightSleepSet(0);
-            }
+            pwm = setFan(pwm);
         } else { 
-            pwm = 0;
-            digitalWrite(pins.power, 0);
+            pwm = setFan(0);
         }
         
         JsonDocument doc, adminDoc;
@@ -500,6 +544,10 @@ void loop() {
             deepSleep(sleepMs); 
             /* reboots */
         } else { 
+            digitalWrite(pins.dhtVcc, 1);
+            delay(2000);
+            gpio_hold_en((gpio_num_t)pins.dhtVcc);
+            gpio_hold_en((gpio_num_t)pins.power);
             lightSleep(sleepMs);
             alreadyLogged = false;
             wakeupTime = millis();
@@ -540,6 +588,13 @@ void deepSleep(int ms) {
 
 void lightSleep(int ms) { 
     OUT("%09.3f LIGHT SLEEP for %dms", millis() / 1000.0, ms);
+    uint32_t startMs = millis();
+    while(millis() - startMs < ms) { 
+        delay(100);
+        wdtReset();
+    }
+    return;
+
     esp_sleep_enable_timer_wakeup(ms * 1000L);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
