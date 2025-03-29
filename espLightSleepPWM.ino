@@ -15,15 +15,15 @@ using std::vector;
 JStuff j;
 
 struct {
-    int dhtGnd = 5; // TMP
-    int dhtData1 = 6;
-    int dhtVcc = 7; // TMP
-    int bv1 = 2;
-    int bv2 = 3; 
-    int power = 9;
-    int fanPwm = 8;
-    int dhtData2 = 0; // TODO
-    int dhtData3 = 0; // TODO 
+    int dhtGnd = 20;    // black 
+    int dhtVcc = 8;     // red
+    int dhtData1 = 9;   // orange
+    int dhtData2 = 10;  // yellow
+    int dhtData3 = 6;  // blue
+    int bv1 = 2;        // purple 
+    int bv2 = 3;        // purple 
+    int fanPwm = 4;     // blue
+    int power = 5;      // green 
 } pins;
 
 SPIFFSVariable<string> configString("/configString3", "");
@@ -179,11 +179,25 @@ public:
             reportLog = logs;
         }
         client.end();
-        wifiDisconnect();
 
         if (reportLog.read().size() == 0) 
             reportTimer.reset();
         reportCount = reportCount + 1;
+
+        const char *ota_ver = rval["ota_ver"];
+        if (ota_ver != NULL) { 
+            if (strcmp(ota_ver, GIT_VERSION) == 0 || strlen(ota_ver) == 0
+                // dont update an existing -dirty unless ota_ver is also -dirty  
+                //|| (strstr(GIT_VERSION, "-dirty") != NULL && strstr(ota_ver, "-dirty") == NULL)
+                ) {
+                OUT("OTA version '%s', local version '%s', no upgrade needed", ota_ver, GIT_VERSION);
+            } else { 
+                OUT("OTA version '%s', local version '%s', upgrading...", ota_ver, GIT_VERSION);
+                webUpgrade("http://vheavy.com/ota");
+            }       
+        }
+
+        wifiDisconnect();
         return rval;
     }
 
@@ -234,16 +248,22 @@ struct Config {
     SimplePID pid;
     float sampleTime;
     float reportTime;
+    float vpdSetPoint;
+    float minBatVolt;
     bool convertToJson(JsonVariant dst) const {
         dst["PID"] = pid;
         dst["SampleTime"] = sampleTime;
         dst["reportTime"] = reportTime;
+        dst["vpdSetPoint"] = vpdSetPoint;
+        dst["minBatVolt"] = minBatVolt;
         return true;
     } 
     void convertFromJson(JsonVariantConst src) { 
         pid = src["PID"];
+        vpdSetPoint = src["vpdSetPoint"] | 3.6;
         sampleTime = src["SampleTime"] | 1.0;
         reportTime = src["reportTime"] | 3.0;
+        minBatVolt = src["minBatVolt"] | 1190;
     }
     void applyNewConfig(const Config &c) { 
         const Config old = *this;
@@ -253,6 +273,7 @@ struct Config {
     }
 } config;
 
+
 #ifdef CSIM
 const char *url = "http://localhost:8080/log";
 #else 
@@ -260,7 +281,7 @@ const char *url = "http://192.168.68.118:8080/log";
 #endif
 
 SleepyLogger logger(url);
-DHT *dht1 = NULL;
+DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 void setup() {
     pinMode(pins.dhtGnd, OUTPUT);
@@ -269,7 +290,11 @@ void setup() {
     digitalWrite(pins.dhtVcc, 1);
 
     dht1 = new DHT(pins.dhtData1, DHT22);
+    dht2 = new DHT(pins.dhtData2, DHT22);
+    dht3 = new DHT(pins.dhtData3, DHT22);
     dht1->begin();
+    dht2->begin();
+    dht3->begin();
 
     j.begin();
     j.jw.enabled = j.mqtt.active = false;
@@ -277,9 +302,8 @@ void setup() {
     readConfig();
     printConfig();
     OUT("quick reboots: %d", j.quickRebootCounter.reboots());
-    if (j.quickRebootCounter.reboots() > 2 || getResetReason(0) == 1) 
-        forcePost = true;
-    OUT("RESET REASON: %s", reset_reason_string(getResetReason()));
+    if (getResetReason(0) != 5/*DEEP SLEEP*/)
+        forcePost = true;  
 }
 
 class RemoteSensorModuleDHT : public RemoteSensorModule {
@@ -291,17 +315,25 @@ public:
     SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
     SensorOutput led = SensorOutput(this, "LED", 22, 0);
     SensorMillis m = SensorMillis(this);
+    bool convertToJson(JsonVariant dst) const {
+        RemoteSensorModuleDHT &t = *((RemoteSensorModuleDHT *)this);
+        dst["temp"] = t.temp.getTemperature();
+        dst["hum"] = t.temp.getHumidity();
+        //dst["age"] = t.temp.getAgeMs();
+        dst["bat"] = round(t.battery.asFloat(), .01);
+        return true;
+    } 
 } ambientTempSensor1("auto");
 
 RemoteSensorServer sensorServer({ &ambientTempSensor1 });
 
-bool convertToJson(const RemoteSensorModuleDHT &t, JsonVariant dst) {
-    dst["temp"] = t.temp.getTemperature();
-    dst["hum"] = t.temp.getHumidity();
-    //dst["age"] = t.temp.getAgeMs();
-    dst["bat"] = round(t.battery.asFloat(), .01);
-    return true;
-} 
+void yieldMs(int ms) {
+    for(int i = 0; i < ms; i += 10) { 
+        sensorServer.run();
+        delay(10);
+    }
+}
+
 template <class T>
 bool convertToJson(const T &p, JsonVariant dst) { return p.convertToJson(dst); }
 
@@ -309,30 +341,47 @@ template <class T>
 void convertFromJson(JsonVariantConst src, T &p) { p.convertFromJson(src); }
 
 
+float calcVpd(float t, float rh) { 
+    float sp = 0.61078 * exp((17.27 * t) / (t + 237.3)) * 7.50062;
+    float vpd = (100 - rh) / 100 * sp;
+    return vpd;
+}
+
 
 void readDht(DHT *dht, float *t, float *h) {
     *t = *h = NAN;
+    wdtReset();
+    digitalWrite(pins.dhtVcc, 0);
+    yieldMs(500);
+    digitalWrite(pins.dhtVcc, 1);
+    yieldMs(100);
+
     for(int retries = 0; retries < 10; retries++) {
-        *t = dht->readTemperature();
         *h = dht->readHumidity();
+        *t = dht->readTemperature();
         if (!isnan(*h) && !isnan(*t)) 
             break;
         retries++;
         OUT("DHT read failure");
-        j.run();
-        delay(500);
+        wdtReset();
+        yieldMs(500);
     }
 }
 
-RemoteSensorModuleDHT x("auto");
+float getVpd(DHT *dht) { 
+    float t = NAN, h = NAN;
+    readDht(dht, &t, &h);
+    return calcVpd(t, h);
+}
 
 bool convertToJson(const DHT &dht, JsonVariant dst) { 
     DHT *p = (DHT *)&dht;
+    float t, h;
+    readDht(p, &t, &h); // TMP prime DHT until we understand problems
     dst["temp"] = p->readTemperature();
     dst["hum"] = p->readHumidity();
     return true;
 }
-
 
 void readSensors(JsonDocument &doc) { 
     // TODO: handle stale data in Sensor::getXXX functions 
@@ -340,13 +389,15 @@ void readSensors(JsonDocument &doc) {
     doc["bv2"] = round(avgAnalogRead(pins.bv2), .1);
     doc["power"] = digitalRead(pins.power);
     doc["pwm"] = lsPwm.getDuty();
-    //doc["RDHT1"] = ambientTempSensor1;
+    doc["RDHT1"] = ambientTempSensor1;
     doc["LDHT1"] = *dht1;
+    doc["LDHT2"] = *dht2;
+    doc["LDHT3"] = *dht3;
 }
 
-int pwm = 1;
 bool alreadyLogged = false;
 uint32_t wakeupTime = 0;
+int pwm = 0;
 
 
 // TODO: observed bug where too short of a sampleTime means it never gets to log or post
@@ -356,31 +407,50 @@ void loop() {
     sensorServer.serverSleepLinger = 30;
     int sensorWaitSec = 30;
     logger.reportTime = config.reportTime;
-
     j.run();
-    sensorServer.run();
-    if (!j.secTick(1)) { 
-        delay(1);
+    if (millis() < 5000) {
+        delay(100);
         return;
-    }   
+    }
+    sensorServer.run();
 
     if (j.secTick(10)) { 
         OUT("%09.3f logq %d, %d since post, free heap %d",
-            millis() / 1000.0,  (int)logger.reportLog.read().size(), 
+            millis() / 1000.0, (int)logger.reportLog.read().size(), 
             (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
+        OUT("RESET REASON: %d %s", getResetReason(0), reset_reason_string(getResetReason()));
+
+        
+        if (0) {
+            JsonDocument d;
+            readSensors(d);
+            string s;
+            serializeJson(d, s);
+            OUT("%s", s.c_str());
+        }
     }
+
     int sleepMs = sensorServer.getSleepRequest() * 1000;
     if (alreadyLogged == false && 
         ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0 || forcePost)) {
         alreadyLogged = true;     
-
-        lsPwm.ledcLightSleepSet(pwm);
-        pinMode(pins.power, OUTPUT);
-        digitalWrite(pins.power, 1);
-        pwm = (pwm + 5) % 64;
-        
-        float vpd = 0.0;
-        float fanPwm = config.pid.calc(vpd);
+        OUT("Evaluating VPD and fan");
+        float vpd = getVpd(dht3);
+        if (vpd > 0.0 && vpd < config.vpdSetPoint) {
+            pwm = -config.pid.calc(vpd - config.vpdSetPoint);
+            pwm = min(63, max(0, pwm));
+            if (pwm > 0) { 
+                OUT("Turning on fan power level %d", pwm);
+                lsPwm.ledcLightSleepSet(pwm);
+                pinMode(pins.power, OUTPUT);
+                digitalWrite(pins.power, 1);
+            } else { 
+                digitalWrite(pins.power, 0);
+                lsPwm.ledcLightSleepSet(0);
+            }
+        } else { 
+            pwm = 0;
+        }
         
         JsonDocument doc, adminDoc;
         adminDoc["MAC"] = getMacAddress().c_str();
@@ -389,7 +459,8 @@ void loop() {
         adminDoc["LogCount"] = (int)logger.logCount;
         adminDoc["PostCount"] = (int)logger.reportCount;
 
-        doc["fanPwm"] = fanPwm; 
+        doc["fanPwm"] = pwm; 
+        doc["VPD"] = round(vpd, .01);;
         readSensors(doc);
         JsonDocument response = logger.log(doc, adminDoc, forcePost);
         forcePost = false;
@@ -407,9 +478,10 @@ void loop() {
         wakeupTime = millis();
         alreadyLogged = false;
     }
+    sleepMs = sensorServer.getSleepRequest() * 1000 - 7000;
     if (sleepMs > 0) {
         sensorServer.prepareSleep(sleepMs); 
-        if (millis() > 8 * 60 * 1000) {
+        if (pwm == 0) {
             logger.prepareSleep(sleepMs);
             deepSleep(sleepMs); 
             /* reboots */
@@ -419,6 +491,7 @@ void loop() {
             wakeupTime = millis();
         }
     }
+    delay(1);
 }
 
 void readConfig() { 
@@ -460,7 +533,8 @@ void lightSleep(int ms) {
 }
 
 bool wifiConnect() { 
-    OUT("connecting"); 
+    OUT("connecting");
+    wifiDisconnect(); 
     j.jw.enabled = true;
     j.mqtt.active = false;
     j.jw.onConnect([](){});
