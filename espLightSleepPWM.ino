@@ -193,7 +193,7 @@ public:
                 OUT("OTA version '%s', local version '%s', no upgrade needed", ota_ver, GIT_VERSION);
             } else { 
                 OUT("OTA version '%s', local version '%s', upgrading...", ota_ver, GIT_VERSION);
-                webUpgrade("http://vheavy.com/ota");
+                webUpgrade("http://192.168.68.118:8080/ota");
             }       
         }
 

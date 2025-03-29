@@ -1,7 +1,7 @@
 #!/bin/bash 
 PORT=/dev/ttyACM0
 BOARD=esp32c3
-BOARD_OPTS=PartitionScheme=huge_app,CDCOnBoot=cdc 
+BOARD_OPTS=PartitionScheme=min_spiffs,CDCOnBoot=cdc 
 #BOARD_OPTS=PartitionScheme=huge_app
 
 GIT_VERSION=`git describe --abbrev=6 --dirty --always --tags`
