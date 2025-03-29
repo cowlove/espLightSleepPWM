@@ -9,13 +9,11 @@
 #include <HTTPClient.h>
 #endif
 
-#ifdef CSIM
-#define URL "http://192.168.68.118:8080"
-#else 
-#define URL "http://192.168.68.118:8080"
-#endif
-const char *url = URL "/log";
-
+string getServerName() { 
+    if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
+    if (WiFi.SSID() == "ClemmyNet") return "http://192.168.68.118:8080";
+    return "http://vheavy.com";
+}
 using std::string;
 using std::vector;
 
@@ -110,10 +108,10 @@ public:
     SPIFFSVariable<int> reportCount = SPIFFSVariable<int>("/reportCount", 0);
     SPIFFSVariable<int> logCount = SPIFFSVariable<int>("/logCount", 0);
     SPIFFSVariable<float> reportTime = SPIFFSVariable<float>("/reportTime", 60);
+    static const int maxLogSize = 100;
     DeepSleepElapsedTime reportTimer;
-    string url;
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
-    SleepyLogger(const char *u) : url(u) {
+    SleepyLogger() {
         if (reportTimer.elapsed() < 1000) 
             reportTimer.reset();
     }
@@ -121,7 +119,7 @@ public:
     void prepareSleep(int ms) {
         reportTimer.sleep(ms);
     }
-    JsonDocument post(JsonDocument adminDoc) {
+    JsonDocument post(const string &url, JsonDocument adminDoc) {
         JsonDocument rval; 
         if (!wifiConnect())
             return rval;
@@ -204,7 +202,8 @@ public:
                 OUT("OTA version '%s', local version '%s', no upgrade needed", ota_ver, GIT_VERSION);
             } else { 
                 OUT("OTA version '%s', local version '%s', upgrading...", ota_ver, GIT_VERSION);
-                webUpgrade(URL "/ota");
+                string url = getServerName() + "/ota";
+                webUpgrade(url.c_str());
             }       
         }
 
@@ -212,7 +211,7 @@ public:
         return rval;
     }
 
-    JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
+    JsonDocument log(const string &url, JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
         JsonDocument result; 
         logCount = logCount + 1;
         doc[TSLP] = reportTimer.elapsed();
@@ -220,9 +219,12 @@ public:
         serializeJson(doc, s);    
         vector<string> logs = reportLog;
         logs.push_back(s);
+        if (logs.size() > maxLogSize)
+            logs.erase(logs.begin());
         reportLog = logs;
         if (forcePost == true || reportTimer.elapsed() > reportTime * 60 * 1000)
-            result = post(adminDoc);
+            result = post(url, adminDoc);
+        
         return result;
     }
 };
@@ -284,7 +286,7 @@ struct Config {
     }
 } config;
 
-SleepyLogger logger(url);
+SleepyLogger logger;
 DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 void setup() {
@@ -470,7 +472,8 @@ void loop() {
         doc["fanPwm"] = pwm; 
         doc["VPD"] = round(vpd, .01);;
         readSensors(doc);
-        JsonDocument response = logger.log(doc, adminDoc, forcePost);
+        const string url = getServerName() + "/log";
+        JsonDocument response = logger.log(url, doc, adminDoc, forcePost);
         forcePost = false;
 
         if (response["CONFIG"]) {
