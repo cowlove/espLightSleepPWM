@@ -133,7 +133,7 @@ public:
         adminDoc["SSID"] = WiFi.SSID().c_str();
         adminDoc["IP"] =  WiFi.localIP().toString().c_str(); 
         adminDoc["RSSI"] = WiFi.RSSI();
-        //adminDoc["ARCH"] = ARDUINO_VARIANT;
+        adminDoc["ARCH"] = ARDUINO_VARIANT;
 
         HTTPClient client;
         const string url = getServerName() + "/log";
