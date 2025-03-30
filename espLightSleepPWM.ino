@@ -522,10 +522,12 @@ void loop() {
         adminDoc["MAC"] = getMacAddress().c_str();
         adminDoc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
         adminDoc["CONFIG"] = config;
-        adminDoc["LogCount"] = (int)logger.logCount;
-        adminDoc["PostCount"] = (int)logger.reportCount;
+        //adminDoc["LogCount"] = (int)logger.logCount;
+        //adminDoc["PostCount"] = (int)logger.reportCount;
 
-        doc["fanPwm"] = pwm; 
+        doc["fanPwm"] = pwm;
+        doc["pidI"] = config.pid.iSum;
+
         readSensors(doc);
         JsonDocument response = logger.log(doc, adminDoc, forcePost);
         forcePost = false;
