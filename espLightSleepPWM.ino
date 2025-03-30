@@ -352,6 +352,7 @@ RemoteSensorServer sensorServer({ &ambientTempSensor1 });
 void yieldMs(int ms) {
     for(int i = 0; i < ms; i += 10) { 
         sensorServer.run();
+        wdtReset();
         delay(10);
     }
 }
@@ -478,6 +479,7 @@ void testLoop() {
 }
 
 int testMode = 0;
+uint32_t minFreeHeap = ESP.getFreeHeap();
 void loop() {
 #if 0
     testLoop();
@@ -494,18 +496,19 @@ void loop() {
     //}
     sensorServer.run();
 
+    minFreeHeap = min(ESP.getFreeHeap(), minFreeHeap);
     if (j.secTick(10)) { 
-        OUT("%09.3f XXXX logq %d, %d since post, free heap %d",
+        OUT("%09.3f queue %d, post age %d, free heap %d, min free heap %d, reset %d",
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
-            (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap());
-        OUT("RESET REASON: %d %s", getResetReason(0), reset_reason_string(getResetReason()));  
+            (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap(), minFreeHeap, 
+            getResetReason(0));
     }
 
     int sleepMs = sensorServer.getSleepRequest() * 1000;
     if (alreadyLogged == false && 
         ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0 || forcePost)) {
         alreadyLogged = true;     
-        OUT("YYYY Evaluating VPD and fan");
+        OUT("Evaluating VPD and fan");
         float vpdInt = getVpd(dht3);
         float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
     
@@ -522,6 +525,8 @@ void loop() {
         adminDoc["MAC"] = getMacAddress().c_str();
         adminDoc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
         adminDoc["CONFIG"] = config;
+        adminDoc["freeHeap"] = ESP.getFreeHeap();
+        adminDoc["minFreeHeap"] = minFreeHeap;
         //adminDoc["LogCount"] = (int)logger.logCount;
         //adminDoc["PostCount"] = (int)logger.reportCount;
 
