@@ -497,7 +497,7 @@ void loop() {
     sensorServer.run();
 
     minFreeHeap = min(ESP.getFreeHeap(), minFreeHeap);
-    if (j.secTick(10)) { 
+    if (j.secTick(10) || j.once()) { 
         OUT("%09.3f queue %d, post age %d, free heap %d, min free heap %d, reset %d",
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
             (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap(), minFreeHeap, 
