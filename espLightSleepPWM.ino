@@ -339,8 +339,8 @@ public:
     SensorMillis m = SensorMillis(this);
     bool convertToJson(JsonVariant dst) const {
         RemoteSensorModuleDHT &dh = *((RemoteSensorModuleDHT *)this);
-        float t = dst["t"] = dh.temp.getTemperature();
-        float h = dst["h"] = dh.temp.getHumidity();
+        float t = dst["t"] = round(dh.temp.getTemperature(), .01);
+        float h = dst["h"] = round(dh.temp.getHumidity(), .01);
         dst["v"] = round(calcVpd(t, h), .01);
         dst["b"] = round(dh.battery.asFloat(), .01);
         return true;
@@ -508,15 +508,15 @@ void loop() {
         OUT("YYYY Evaluating VPD and fan");
         float vpdInt = getVpd(dht3);
         float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
-        if (!isnan(vpdInt)) {
-            float err = 0;
-            if (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint)
-                err = vpdInt - config.vpdSetPoint;
+    
+        if (!isnan(vpdInt) 
+            && (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint)) {
+            float err = vpdInt - config.vpdSetPoint;
             pwm = -config.pid.calc(err);
-            pwm = setFan(pwm);
-        } else { 
-            pwm = setFan(0);
+        } else {
+            pwm = 0;
         }
+        pwm = setFan(pwm);
         
         JsonDocument doc, adminDoc;
         adminDoc["MAC"] = getMacAddress().c_str();
