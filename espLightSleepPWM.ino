@@ -398,8 +398,8 @@ bool convertToJson(const DHT &dht, JsonVariant dst) {
     DHT *p = (DHT *)&dht;
     float t, h;
     readDht(p, &t, &h); // TMP prime DHT until we understand problems
-    dst["t"] = t;
-    dst["h"] = h;
+    dst["t"] = round(t, .01);
+    dst["h"] = round(h, .01);
     dst["v"] = round(calcVpd(t, h), .01);
     return true;
 }
@@ -531,7 +531,7 @@ void loop() {
         //adminDoc["PostCount"] = (int)logger.reportCount;
 
         doc["fanPwm"] = pwm;
-        doc["pidI"] = config.pid.iSum;
+        doc["pidI"] = round(config.pid.iSum, .001);
 
         readSensors(doc);
         JsonDocument response = logger.log(doc, adminDoc, forcePost);
@@ -605,10 +605,13 @@ void deepSleep(int ms) {
 
 void lightSleep(int ms) { 
     OUT("%09.3f LIGHT SLEEP for %dms", millis() / 1000.0, ms);
+
+    // TMP can't get light sleep PWM working on ESP32C3 
     uint32_t startMs = millis();
     while(millis() - startMs < ms) { 
         delay(100);
         wdtReset();
+        sensorServer.run(); // might as well as long as we're not sleeping
     }
     return;
 
