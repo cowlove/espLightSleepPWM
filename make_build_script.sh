@@ -19,12 +19,6 @@ arduino-cli compile -v -b esp32:esp32:${BOARD} --build-path ${BUILDDIR} \
    -u -p ${PORT}\
 	 | tee "$TMP"
 
-ls -l $TMP
-
-#ls /tmp/arduino/sketches && BASEDIR=/tmp/arduino/sketches
-#ls ${HOME}/.cache/arduino/sketches && BASEDIR=${HOME}/.cache/arduino/sketches
-
-#SKETCHDIR=/tmp/arduino/sketches/`rematch '/tmp/arduino/sketches/([A-Z0-9]+)/' $TMP | head -1`
 SKETCHDIR="$BUILDDIR"
 SKETCHCPP="${SKETCHDIR}/sketch/${SKETCH}.ino.cpp"
 OUT=./build-${BOARD}.sh
@@ -73,4 +67,4 @@ fi;
 END
 
 chmod 755 $OUT
-#rm -f $TMP
+rm -f $TMP
