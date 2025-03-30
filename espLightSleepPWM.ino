@@ -7,6 +7,7 @@
 #include "driver/ledc.h"
 #include "rom/uart.h"
 #include <HTTPClient.h>
+#include <esp_sleep.h>
 #endif
 
 string getServerName() { 
@@ -70,7 +71,9 @@ struct LightSleepPWM {
     void ledcLightSleepSet(int i) { 
         ledc_set_duty(LEDC_LS_MODE, chan, i);
         ledc_update_duty(LEDC_LS_MODE, chan);
+#if SOC_PM_SUPPORT_RTC_PERIPH_PD
         esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_AUTO);
+#endif
         delay(100);
         //printf("Frequency %u Hz duty %d\n", 
         //    ledc_get//_freq(LEDC_LS_MODE, LEDC_LS_TIMER),
@@ -123,8 +126,18 @@ public:
     JsonDocument post(JsonDocument adminDoc) {
         JsonDocument rval; 
         if (!wifiConnect()) {
-            OUT("Failed to connect, sleeping");
-            deepSleep(30 * 1000);
+            int sleepMin = 1;
+            OUT("Failed to connect, sleeping %d min", sleepMin);
+            // real light sleep, not delaySleep currently in lightSleep();
+            // TODO: need to collect all deepSleep calls into a sleep manager
+            // that also updates the DeepSleepElapsedTime counters like reportTimer 
+            // right now they get cleared 
+            digitalWrite(pins.power, 0);
+            esp_sleep_enable_timer_wakeup(sleepMin * 60 * 1000000L);
+            fflush(stdout);
+            uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
+            esp_light_sleep_start();
+            deepSleep(0);
             return rval;
         }
         
@@ -134,6 +147,7 @@ public:
         adminDoc["IP"] =  WiFi.localIP().toString().c_str(); 
         adminDoc["RSSI"] = WiFi.RSSI();
         adminDoc["ARCH"] = ARDUINO_VARIANT;
+        adminDoc["AVER"] = ESP_ARDUINO_VERSION_STR;
 
         HTTPClient client;
         const string url = getServerName() + "/log";
@@ -479,7 +493,13 @@ void testLoop() {
 }
 
 int testMode = 0;
-uint32_t minFreeHeap = ESP.getFreeHeap();
+volatile uint32_t minFreeHeap = 0xffffffff;
+
+uint32_t freeHeap() { 
+    uint32_t fr = ESP.getFreeHeap();
+    if (fr < minFreeHeap) minFreeHeap = fr;
+    return fr;
+}
 void loop() {
 #if 0
     testLoop();
@@ -496,11 +516,10 @@ void loop() {
     //}
     sensorServer.run();
 
-    minFreeHeap = min(ESP.getFreeHeap(), minFreeHeap);
     if (j.secTick(10) || j.once()) { 
         OUT("%09.3f queue %d, post age %d, free heap %d, min free heap %d, reset %d",
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
-            (int)logger.reportTimer.elapsed(), (int)ESP.getFreeHeap(), minFreeHeap, 
+            (int)logger.reportTimer.elapsed(), (int)freeHeap(), minFreeHeap, 
             getResetReason(0));
     }
 
@@ -525,7 +544,7 @@ void loop() {
         adminDoc["MAC"] = getMacAddress().c_str();
         adminDoc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
         adminDoc["CONFIG"] = config;
-        adminDoc["freeHeap"] = ESP.getFreeHeap();
+        adminDoc["freeHeap"] = freeHeap();
         adminDoc["minFreeHeap"] = minFreeHeap;
         //adminDoc["LogCount"] = (int)logger.logCount;
         //adminDoc["PostCount"] = (int)logger.reportCount;
@@ -553,16 +572,16 @@ void loop() {
     sleepMs = sensorServer.getSleepRequest() * 1000 - 7000;
     if (sleepMs > 0) {
         if (avgAnalogRead(pins.bv1) < 2200) { // charge up our LiPo this sleep
-            digitalWrite(pins.power, 1);
+            digitalWrite(pins.power, 1);      // TODO: pwm could still be set? 
         }
         sensorServer.prepareSleep(sleepMs); 
         if (pwm == 0 && digitalRead(pins.power) == 0) {
             logger.prepareSleep(sleepMs);
+            digitalWrite(pins.power ,0);
             deepSleep(sleepMs); 
             /* reboots */
         } else { 
             digitalWrite(pins.dhtVcc, 1);
-            delay(2000);
             gpio_hold_en((gpio_num_t)pins.dhtVcc);
             gpio_hold_en((gpio_num_t)pins.power);
             lightSleep(sleepMs);
