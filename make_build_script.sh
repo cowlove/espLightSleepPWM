@@ -12,8 +12,7 @@ cd "`dirname $0`"
 SKETCH="`basename \`pwd\``"
 BUILDDIR="/tmp/arduino/${SKETCH}/${BOARD}"
 mkdir -p ${BUILDDIR}
-TMP="${BUILDDIR}/$$.txt"
-mkdir -p "${BUILDDIR}"
+TMP="/tmp/$$.txt"
 arduino-cli compile -v -b esp32:esp32:${BOARD} --build-path ${BUILDDIR} \
   --board-options ${BOARD_OPTS} \
   --build-property compiler.cpp.extra_flags="-DGIT_VERSION=\"${GIT_VERSION}\"" \
