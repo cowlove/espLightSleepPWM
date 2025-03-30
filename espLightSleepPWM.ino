@@ -95,6 +95,7 @@ void saveConfig();
 void printConfig(); 
 void deepSleep(int ms);
 void lightSleep(int ms);
+float calcVpd(float t, float h);
 string floatRemoveTrailingZeros(string &);
 
 float round(float f, float prec) { 
@@ -121,15 +122,18 @@ public:
     }
     JsonDocument post(JsonDocument adminDoc) {
         JsonDocument rval; 
-        if (!wifiConnect())
+        if (!wifiConnect()) {
+            OUT("Failed to connect, sleeping");
+            deepSleep(30 * 1000);
             return rval;
+        }
         
         adminDoc["GIT"] = GIT_VERSION;
         adminDoc["MAC"] = getMacAddress().c_str(); 
         adminDoc["SSID"] = WiFi.SSID().c_str();
         adminDoc["IP"] =  WiFi.localIP().toString().c_str(); 
         adminDoc["RSSI"] = WiFi.RSSI();
-        adminDoc["ARCH"] = ARDUINO_VARIANT;
+        //adminDoc["ARCH"] = ARDUINO_VARIANT;
 
         HTTPClient client;
         const string url = getServerName() + "/log";
@@ -190,6 +194,10 @@ public:
         }
         client.end();
 
+        if (fail == true) { 
+            OUT("Failed to post, sleeping");
+            deepSleep(30 * 1000);
+        }
         if (reportLog.read().size() == 0) 
             reportTimer.reset();
         reportCount = reportCount + 1;
@@ -330,11 +338,11 @@ public:
     SensorOutput led = SensorOutput(this, "LED", 22, 0);
     SensorMillis m = SensorMillis(this);
     bool convertToJson(JsonVariant dst) const {
-        RemoteSensorModuleDHT &t = *((RemoteSensorModuleDHT *)this);
-        dst["temp"] = t.temp.getTemperature();
-        dst["hum"] = t.temp.getHumidity();
-        //dst["age"] = t.temp.getAgeMs();
-        dst["bat"] = round(t.battery.asFloat(), .01);
+        RemoteSensorModuleDHT &dh = *((RemoteSensorModuleDHT *)this);
+        float t = dst["t"] = dh.temp.getTemperature();
+        float h = dst["h"] = dh.temp.getHumidity();
+        dst["v"] = round(calcVpd(t, h), .01);
+        dst["b"] = round(dh.battery.asFloat(), .01);
         return true;
     } 
 } ambientTempSensor1("EC64C9986F2C");
@@ -389,8 +397,9 @@ bool convertToJson(const DHT &dht, JsonVariant dst) {
     DHT *p = (DHT *)&dht;
     float t, h;
     readDht(p, &t, &h); // TMP prime DHT until we understand problems
-    dst["temp"] = p->readTemperature();
-    dst["hum"] = p->readHumidity();
+    dst["t"] = t;
+    dst["h"] = h;
+    dst["v"] = round(calcVpd(t, h), .01);
     return true;
 }
 
@@ -400,10 +409,10 @@ void readSensors(JsonDocument &doc) {
     doc["bv2"] = round(avgAnalogRead(pins.bv2), .1);
     doc["power"] = digitalRead(pins.power);
     doc["pwm"] = lsPwm.getDuty();
-    doc["RDHT1"] = ambientTempSensor1;
-    doc["LDHT1"] = *dht1;
-    doc["LDHT2"] = *dht2;
-    doc["LDHT3"] = *dht3;
+    doc["Tamb"] = ambientTempSensor1;
+    doc["Tex1"] = *dht1;
+    doc["Tex2"] = *dht2;
+    doc["Tint"] = *dht3;
 }
 
 bool alreadyLogged = false;
@@ -498,9 +507,13 @@ void loop() {
         ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0 || forcePost)) {
         alreadyLogged = true;     
         OUT("YYYY Evaluating VPD and fan");
-        float vpd = getVpd(dht3);
-        if (!isnan(vpd)) { 
-            pwm = -config.pid.calc(vpd - config.vpdSetPoint);
+        float vpdInt = getVpd(dht3);
+        float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
+        if (!isnan(vpdInt) && !isnan(vpdExt)) {
+            float err = 0;
+            if (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint)
+                err = vpdInt - config.vpdSetPoint;
+            pwm = -config.pid.calc(err);
             pwm = setFan(pwm);
         } else { 
             pwm = setFan(0);
@@ -514,7 +527,6 @@ void loop() {
         adminDoc["PostCount"] = (int)logger.reportCount;
 
         doc["fanPwm"] = pwm; 
-        doc["VPD"] = round(vpd, .01);;
         readSensors(doc);
         JsonDocument response = logger.log(doc, adminDoc, forcePost);
         forcePost = false;
