@@ -4,6 +4,8 @@ BOARD=esp32c3
 BOARD_OPTS=PartitionScheme=min_spiffs,CDCOnBoot=cdc 
 #BOARD_OPTS=PartitionScheme=huge_app
 
+# As of 3/30 8:30am this is the best working version of make_build
+
 GIT_VERSION=`git describe --abbrev=8 --dirty --always --tags`
 
 cd "`dirname $0`"
