@@ -9,16 +9,19 @@ GIT_VERSION=`git describe --abbrev=8 --dirty --always --tags`
 cd "`dirname $0`"
 SKETCH="`basename \`pwd\``"
 BUILDDIR="/tmp/arduino/${SKETCH}/${BOARD}"
+mkdir -p ${BUILDDIR}
 TMP="${BUILDDIR}/$$.txt"
 mkdir -p "${BUILDDIR}"
-arduino-cli compile -e -v -b esp32:esp32:${BOARD} --build-path ${BUILDDIR} \
+arduino-cli compile -v -b esp32:esp32:${BOARD} --build-path ${BUILDDIR} \
   --board-options ${BOARD_OPTS} \
   --build-property compiler.cpp.extra_flags="-DGIT_VERSION=\"${GIT_VERSION}\"" \
    -u -p ${PORT}\
 	 | tee "$TMP"
 
-ls /tmp/arduino/sketches && BASEDIR=/tmp/arduino/sketches
-ls ${HOME}/.cache/arduino/sketches && BASEDIR=${HOME}/.cache/arduino/sketches
+ls -l $TMP
+
+#ls /tmp/arduino/sketches && BASEDIR=/tmp/arduino/sketches
+#ls ${HOME}/.cache/arduino/sketches && BASEDIR=${HOME}/.cache/arduino/sketches
 
 #SKETCHDIR=/tmp/arduino/sketches/`rematch '/tmp/arduino/sketches/([A-Z0-9]+)/' $TMP | head -1`
 SKETCHDIR="$BUILDDIR"

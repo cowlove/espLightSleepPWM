@@ -483,7 +483,6 @@ void loop() {
     testLoop();
     return;
 #endif
-
     sensorServer.serverSleepSeconds = config.sampleTime * 60;
     sensorServer.serverSleepLinger = 30;
     int sensorWaitSec = 30;
@@ -509,7 +508,7 @@ void loop() {
         OUT("YYYY Evaluating VPD and fan");
         float vpdInt = getVpd(dht3);
         float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
-        if (!isnan(vpdInt) && !isnan(vpdExt)) {
+        if (!isnan(vpdInt)) {
             float err = 0;
             if (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint)
                 err = vpdInt - config.vpdSetPoint;
