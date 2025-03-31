@@ -773,9 +773,13 @@ class Csim : public ESP32sim_Module {
         wsim.run();
         int pow = digitalRead(pins.power);
         int pwm = ESP32sim_currentPwm[2];
-        float salt = millis() / 10000.0;
-        setSimluatedAmbientTemp(12 - salt, 40 + salt);
-        setSimluatedInteriorTemp(5, 80);
+        setSimluatedAmbientTemp(12, 40);
+
+        if (millis() % 2000000 > 1000000) { 
+            setSimluatedInteriorTemp(5, 80);
+        } else { 
+            setSimluatedInteriorTemp(15, 60);
+        }
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);
         client1.run();
