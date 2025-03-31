@@ -386,6 +386,8 @@ public:
         float h = dst["h"] = round(dh.temp.getHumidity(), .01);
         dst["v"] = round(calcVpd(t, h), .01);
         dst["b"] = round(dh.battery.asFloat(), .01);
+        dst["ms"] = m.asInt();
+        dst["err"] = dh.temp.getRetries();
         return true;
     } 
 } ambientTempSensor1("EC64C9986F2C");
@@ -467,7 +469,7 @@ int pwm = 0;
 
 int setFan(int pwm) { 
     pwm = min(config.maxFan, max(0, pwm));
-    OUT("Turning on fan power level %d", pwm);
+    //OUT("Turning on fan power level %d", pwm);
     if (pwm > 0) { 
         lsPwm.ledcLightSleepSet(pwm);
         pinMode(pins.power, OUTPUT);
@@ -561,6 +563,8 @@ void loop() {
             pwm = 0;
         }
         pwm = setFan(pwm);
+        OUT("Turning on fan power level %d", pwm);
+
         
         JsonDocument doc, adminDoc;
         adminDoc["MAC"] = getMacAddress().c_str();
