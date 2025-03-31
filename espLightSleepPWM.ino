@@ -566,7 +566,6 @@ void loop() {
         pwm = setFan(pwm);
         OUT("Turning on fan power level %d", pwm);
 
-        
         JsonDocument doc, adminDoc;
         adminDoc["MAC"] = getMacAddress().c_str();
         adminDoc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
@@ -596,7 +595,10 @@ void loop() {
         wakeupTime = millis();
         alreadyLogged = false;
     }
-
+    if (avgAnalogRead(pins.bv2) < config.minBatVolt) {
+        OUT("Disabling fan due to battery voltage %.1f/%.1f", avgAnalogRead(pins.bv2), config.minBatVolt);
+        pwm = 0;
+    }
     pwm = setFan(pwm);
     sleepMs = sensorServer.getSleepRequest() * 1000 - 7000;
     if (sleepMs > 0) {
@@ -712,6 +714,8 @@ class Csim : public ESP32sim_Module {
     }
     void setup() override {
         client1.csimOverrideMac("EC64C9986F2C");
+        ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, 2000); // low enough to keep csim from deep sleeping
+        ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, 1435);
     }
     void setSimluatedAmbientTemp(float t, float h) {
         SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
