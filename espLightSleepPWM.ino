@@ -346,11 +346,6 @@ DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 void setup() {
     j.begin();
-    float bv1 = avgAnalogRead(pins.bv1);
-    if (bv1 > 1000 && bv1 < 2000) { 
-        printf("Battery too low %.1f sleeping 1 hour\n", bv1);
-        deepSleep(60 * 60 * 1000);
-    }
     pinMode(pins.dhtGnd, OUTPUT);
     digitalWrite(pins.dhtGnd, 0);
     pinMode(pins.dhtVcc, OUTPUT);
@@ -529,10 +524,18 @@ void loop() {
     testLoop();
     return;
 #endif
+    pwm = setFan(pwm); // power keeps getting turned on???
     sensorServer.serverSleepSeconds = config.sampleTime * 60;
     sensorServer.serverSleepLinger = 30;
     int sensorWaitSec = 30;
     logger.reportTime = config.reportTime;
+
+    float bv1 = avgAnalogRead(pins.bv1);
+    if (false && bv1 > 1000 && bv1 < 2000) { 
+        printf("Battery too low %.1f sleeping 1 hour\n", bv1);
+        deepSleep(60 * 60 * 1000);
+    }
+
     j.run();
     //if (millis() < 5000) {
     //    delay(100);
@@ -541,10 +544,10 @@ void loop() {
     sensorServer.run();
 
     if (j.secTick(10) || j.once()) { 
-        OUT("%09.3f queue %d, post age %d, free heap %d, min free heap %d, reset %d",
+        OUT("%09.3f q %d, post age %d, min free heap %d, bv1 %.1f bv2 %.1f pwm %d power %d",
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
-            (int)logger.reportTimer.elapsed(), (int)freeHeap(), minFreeHeap, 
-            getResetReason(0));
+            (int)logger.reportTimer.elapsed(), minFreeHeap, 
+            avgAnalogRead(pins.bv1), avgAnalogRead(pins.bv2), pwm, digitalRead(pins.power));
     }
 
     int sleepMs = sensorServer.getSleepRequest() * 1000;
@@ -700,6 +703,26 @@ string floatRemoveTrailingZeros(string &s) {
 }
 
 #ifdef CSIM
+class WorldSim {
+    public:
+  long double bv1 = 2100, bv2 = 1500;
+  uint32_t lastRun = millis(), now = millis();
+  bool secTick(float sec) { 
+    return now % (int)(sec * 1000) != lastRun % (int)(sec * 1000);
+  }
+  void run() {
+    now = millis();
+    if (secTick(1)) { 
+        if (digitalRead(pins.power)) {
+            bv1 = min(2666.0L, bv1 + .0001L);
+        } else {
+            bv1 = max(900.0L, bv1 - .0001);
+        }
+    }
+    lastRun = millis(); 
+  }  
+} wsim;
+
 class Csim : public ESP32sim_Module {
     public:
     Csim() {
@@ -714,8 +737,6 @@ class Csim : public ESP32sim_Module {
     }
     void setup() override {
         client1.csimOverrideMac("EC64C9986F2C");
-        ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, 2000); // low enough to keep csim from deep sleeping
-        ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, 1435);
     }
     void setSimluatedAmbientTemp(float t, float h) {
         SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
@@ -727,11 +748,14 @@ class Csim : public ESP32sim_Module {
             csim_dht.csim_set(dht3->pin, t, h);
     }
     void loop() override {
+        wsim.run();
         int pow = digitalRead(pins.power);
         int pwm = ESP32sim_currentPwm[2];
         float salt = millis() / 10000.0;
         setSimluatedAmbientTemp(12 - salt, 40 + salt);
-        setSimluatedInteriorTemp(10 - salt, 60 + salt);
+        setSimluatedInteriorTemp(20, 50);
+        ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
+        ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);
         client1.run();
     }
 } csim;
