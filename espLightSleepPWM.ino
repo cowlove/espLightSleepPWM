@@ -558,6 +558,7 @@ void loop() {
         if (!isnan(vpdInt) 
             && (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint)) {
             float err = vpdInt - config.vpdSetPoint;
+            if (config.pid.iSum > 0) config.pid.iSum = 0; // TMP limit iSum to negative until we use a plant model 
             pwm = -config.pid.calc(err);
         } else {
             pwm = 0;
@@ -698,6 +699,11 @@ string floatRemoveTrailingZeros(string &s) {
 
 #ifdef CSIM
 class Csim : public ESP32sim_Module {
+    public:
+    Csim() {
+        ESPNOW_sendHandler = new ESPNOW_csimOneProg();
+        csim_flags.OneProg = true;
+    }
     RemoteSensorClient client1; 
     string dummy;
     void parseArg(char **&a, char **la) override {
@@ -705,8 +711,6 @@ class Csim : public ESP32sim_Module {
                 dummy = *(++a);
     }
     void setup() override {
-        ESPNOW_sendHandler= new ESPNOW_csimOneProg();
-        csim_flags.OneProg = true;
         client1.csimOverrideMac("EC64C9986F2C");
     }
     void setSimluatedAmbientTemp(float t, float h) {
