@@ -124,9 +124,8 @@ HAL *hal = &halHW;
 void setHITL();
     
 SPIFFSVariable<string> configString("/configString3", "");
-;
 
-class DeepSleepElapsedTime {
+class DeepSleepElapsedTime { // TODO move this into new sleep manager class 
     SPIFFSVariable<int> bootStartMs = SPIFFSVariable<int>("/deepSleepElapsedTime", 0);
 public:
     DeepSleepElapsedTime() {}
@@ -152,7 +151,7 @@ uint32_t freeHeap() {
     return fr;
 }
 
-float round(float f, float prec) { 
+static inline float round(float f, float prec) { 
     return floor(f / prec + .5) * prec;
 }
 
@@ -485,8 +484,6 @@ bool alreadyLogged = false;
 uint32_t wakeupTime = 0;
 int pwm = 0;
 
-// TODO: observed bug where too short of a sampleTime means it never gets to log or post
-
 int setFan(int pwm) { 
     pwm = min(config.maxFan, max(0, pwm));
     //OUT("Turning on fan power level %d", pwm);
@@ -536,6 +533,10 @@ void testLoop() {
     }
 }
 
+// TODO: observed bug where too short of a sampleTime means it never gets to log or post
+// TODO: separate sensorServer sleep request and the sample loop, they are now the same
+// duration 
+
 int testMode = 0;
 void loop() {
 #if 0
@@ -555,6 +556,7 @@ void loop() {
     }
 
     j.run();
+    // errors connecting to WIFI too early? 
     //if (millis() < 5000) {
     //    delay(100);
     //    return;
