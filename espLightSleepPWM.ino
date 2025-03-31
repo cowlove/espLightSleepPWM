@@ -711,10 +711,12 @@ class Csim : public ESP32sim_Module {
     }
     void setSimluatedAmbientTemp(float t, float h) {
         SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
-        csim_dht.csim_set(sensor->dht.pin, t, h);
+        if (sensor) 
+            csim_dht.csim_set(sensor->dht.pin, t, h);
     }
     void setSimluatedInteriorTemp(float t, float h) {
-        csim_dht.csim_set(dht3->pin, t, h);
+        if (dht3) 
+            csim_dht.csim_set(dht3->pin, t, h);
     }
     void loop() override {
         int pow = digitalRead(pins.power);
