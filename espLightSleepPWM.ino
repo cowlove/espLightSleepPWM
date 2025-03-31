@@ -591,6 +591,8 @@ void loop() {
         wakeupTime = millis();
         alreadyLogged = false;
     }
+
+    pwm = setFan(pwm);
     sleepMs = sensorServer.getSleepRequest() * 1000 - 7000;
     if (sleepMs > 0) {
         if (avgAnalogRead(pins.bv1) < 2200) { // charge up our LiPo this sleep
@@ -599,7 +601,6 @@ void loop() {
         sensorServer.prepareSleep(sleepMs); 
         if (pwm == 0 && digitalRead(pins.power) == 0) {
             logger.prepareSleep(sleepMs);
-            digitalWrite(pins.power ,0);
             deepSleep(sleepMs); 
             /* reboots */
         } else { 
@@ -690,3 +691,38 @@ string floatRemoveTrailingZeros(string &s) {
     s = regex_replace(s, regex("[.]*[0]+$"), "");
     return s;
 }
+
+#ifdef CSIM
+class Csim : public ESP32sim_Module {
+    RemoteSensorClient client1; 
+    string dummy;
+    void parseArg(char **&a, char **la) override {
+        if (strcmp(*a, "--dummy") == 0)
+                dummy = *(++a);
+    }
+    void setup() override {
+        if (csim_flags.OneProg == false) { 
+            printf("requires --espnowOneProg\n");
+            exit(-1);
+        }
+        client1.csimOverrideMac("EC64C9986F2C");
+    }
+    void setSimluatedAmbientTemp(float t, float h) {
+        SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
+        csim_dht.csim_set(sensor->dht.pin, t, h);
+    }
+    void setSimluatedInteriorTemp(float t, float h) {
+        csim_dht.csim_set(dht3->pin, t, h);
+    }
+    void loop() override {
+        int pow = digitalRead(pins.power);
+        int pwm = ESP32sim_currentPwm[2];
+        float salt = millis() / 10000.0;
+        setSimluatedAmbientTemp(12 - salt, 40 + salt);
+        setSimluatedInteriorTemp(10 - salt, 60 + salt);
+        client1.run();
+    }
+} csim;
+#endif
+
+
