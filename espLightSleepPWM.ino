@@ -133,7 +133,7 @@ public:
     JsonDocument post(JsonDocument adminDoc) {
         JsonDocument rval; 
         if (!wifiConnect()) {
-            int sleepMin = 30;
+            int sleepMin = 15;
             OUT("Failed to connect, sleeping %d min", sleepMin);
             // real light sleep, not delaySleep currently in lightSleep();
             // TODO: need to collect all deepSleep calls into a sleep manager
