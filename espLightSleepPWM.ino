@@ -100,6 +100,13 @@ void deepSleep(int ms);
 void lightSleep(int ms);
 float calcVpd(float t, float h);
 string floatRemoveTrailingZeros(string &);
+volatile uint32_t minFreeHeap = 0xffffffff;
+
+uint32_t freeHeap() { 
+    uint32_t fr = ESP.getFreeHeap();
+    if (fr < minFreeHeap) minFreeHeap = fr;
+    return fr;
+}
 
 float round(float f, float prec) { 
     return floor(f / prec + .5) * prec;
@@ -137,6 +144,7 @@ public:
             fflush(stdout);
             uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
             esp_light_sleep_start();
+            reportTimer.sleep(0 * 60 * 1000LL);
             deepSleep(0);
             return rval;
         }
@@ -147,22 +155,43 @@ public:
         adminDoc["IP"] =  WiFi.localIP().toString().c_str(); 
         adminDoc["RSSI"] = WiFi.RSSI();
         adminDoc["ARCH"] = ARDUINO_VARIANT;
-        adminDoc["AVER"] = ESP_ARDUINO_VERSION_STR;
+        //adminDoc["AVER"] = ESP_ARDUINO_VERSION_STR;
 
         HTTPClient client;
         const string url = getServerName() + "/log";
         int r = client.begin(url.c_str());
-        OUT("http.begin() returned %d", r);
+#if 0
+        do { 
+            printf("http.begin() returned Z%d\n", r);
+            printf("http.begin() returned X%d\n", r);
+            printf("%d q %d min free heap %d free heap %d\n", 
+                __LINE__, (int)reportLog.read().size(), minFreeHeap, freeHeap());
+            fflush(stdout);
+            uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
+            delay(500);
+        } while(0);
+#endif
         client.addHeader("Content-Type", "application/json");
+        OUT("%d q %d min free heap %d free heap %d", __LINE__, reportLog.read().size(), minFreeHeap, freeHeap());
+        fflush(stdout);
+        uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
+
 
         bool fail = false;
         while(reportLog.read().size() > 0) {
+            //OUT("q %d min free heap %d free heap %d", reportLog.read().size(), minFreeHeap, freeHeap());
+            fflush(stdout);
+            uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
             string admin, data, post;
             serializeJson(adminDoc, admin);
             post = "{\"ADMIN\":" + admin + ",\"LOG\":[";
 
             int i = 0;
             for(i = 0; i < reportLog.read().size() && i < 10; i++) { 
+                //OUT("q %d item %d min free heap %d free heap %d", reportLog.read().size(), i,
+                //minFreeHeap, freeHeap());
+                fflush(stdout);
+                uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
                 JsonDocument doc;
                 DeserializationError error = deserializeJson(doc, reportLog.read()[i]);
                 if (!error && doc[TSLP].as<int>() != 0) {
@@ -493,13 +522,6 @@ void testLoop() {
 }
 
 int testMode = 0;
-volatile uint32_t minFreeHeap = 0xffffffff;
-
-uint32_t freeHeap() { 
-    uint32_t fr = ESP.getFreeHeap();
-    if (fr < minFreeHeap) minFreeHeap = fr;
-    return fr;
-}
 void loop() {
 #if 0
     testLoop();

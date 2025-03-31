@@ -1,8 +1,14 @@
 #!/bin/bash 
-PORT=/dev/ttyACM0
 BOARD=esp32c3
-BOARD_OPTS=PartitionScheme=min_spiffs,CDCOnBoot=cdc 
-#BOARD_OPTS=PartitionScheme=huge_app
+
+if [ "$BOARD" == "esp32" ]; then
+	BOARD_OPTS=PartitionScheme=min_spiffs
+	PORT=/dev/ttyUSB0
+fi 
+if [ "$BOARD" == "esp32c3" ]; then 
+	BOARD_OPTS=PartitionScheme=min_spiffs,CDCOnBoot=cdc
+	PORT=/dev/ttyACM0
+fi
 
 # As of 3/30 8:30am this is the best working version of make_build
 
@@ -60,7 +66,7 @@ fi
 if [[ \$OPT == *m* ]]; then
 	echo Monitoring...
 	if [[ \$OPT == *w* ]]; then echo -n Waiting for ${PORT}...; while [ ! -e ${PORT} ]; do sleep .01; done; echo OK; fi;
-	stty -F ${PORT} 115200 raw -echo && cat ${PORT}
+	while sleep .01; do if [ -e ${PORT} ]; then stty -F ${PORT} 115200 raw -echo && cat ${PORT}; fi; done
 fi;
 
 

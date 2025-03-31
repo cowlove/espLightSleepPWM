@@ -1,1 +1,4 @@
 python3 "/home/jim/.arduino15/packages/esp32/tools/esptool_py/4.5.1/esptool.py" --chip esp32c3 -p /dev/ttyACM0 erase_flash
+
+TODO: found examples [2025-03-31T00:57:46.712Z]  where power pin left high, probably 
+old code 
