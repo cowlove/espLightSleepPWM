@@ -67,6 +67,15 @@ struct LightSleepPWM {
     int getDuty() { return ledc_get_duty(LEDC_LS_MODE, chan); }     
 } lsPwm;
 
+//                     ---USB PLUG---
+//   bv1    purp       2           +5V      red     power
+//   bv2    purp       3           GND      blk     ground
+//   fan    blue       4   TOP     +3.3V
+//   fanpow green      5           10       yellow  dht2
+//   dht3   blue       6           9        orange  dht1
+//   NC                7           8        red     dhtvcc
+//   NC                21          20       blk     dhtgnd 
+
 struct {
     int dhtGnd = 20;    // black 
     int dhtVcc = 8;     // red
@@ -112,33 +121,7 @@ public:
 } halHW;
 
 HAL *hal = &halHW;
-
-class HAL_esp32c3_HIL : public HAL {
-    typedef HAL Parent; 
-public:
-    float avgAnalogRead(int p)  {
-        if (p == pins.bv1) return 2500;
-        if (p == pins.bv2) return 1500;
-        return Parent::avgAnalogRead(p);
-    };
-    
-    void readDht(DHT *dht, float *t, float *h)  {
-        if (millis() % 240000 < 120000) { 
-            *t = 5;
-            *h = 80;
-        } else { 
-            *t = 16;
-            *h = 50;
-        }
-    };
-    void digitalWrite(int p, int v)  { 
-        if (p == pins.power) { 
-        }
-        Parent::digitalWrite(p, v); }
-    void setPWM(int p, int v)  {
-        Parent::setPWM(p, v);
-    };   
-} halHIL;
+void setHITL();
     
 SPIFFSVariable<string> configString("/configString3", "");
 ;
@@ -406,7 +389,7 @@ SleepyLogger logger;
 DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 void setup() {
-    //if (getMacAddress() == "E4B323C55708") hal = &halHIL;
+    //if (getMacAddress() == "E4B323C55708") setHITL();
 
     j.begin();
     hal->pinMode(pins.dhtGnd, OUTPUT);
@@ -798,4 +781,33 @@ class Csim : public ESP32sim_Module {
 } csim;
 #endif
 
+class HAL_esp32c3_HIL : public HAL {
+    typedef HAL Parent; 
+public:
+    float avgAnalogRead(int p)  {
+        if (p == pins.bv1) return 2500;
+        if (p == pins.bv2) return 1500;
+        return Parent::avgAnalogRead(p);
+    };
+    
+    void readDht(DHT *dht, float *t, float *h)  {
+        if (millis() % 240000 < 120000) { 
+            *t = 5;
+            *h = 80;
+        } else { 
+            *t = 16;
+            *h = 50;
+        }
+    };
+    void digitalWrite(int p, int v)  { 
+        if (p == pins.power) { 
+        }
+        Parent::digitalWrite(p, v); }
+    void setPWM(int p, int v)  {
+        Parent::setPWM(p, v);
+    };   
+} halHIL;
 
+void setHITL() { 
+    hal = &halHIL;
+}
