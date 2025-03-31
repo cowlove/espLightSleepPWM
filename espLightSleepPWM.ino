@@ -144,7 +144,6 @@ public:
             fflush(stdout);
             uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
             esp_light_sleep_start();
-            reportTimer.sleep(0 * 60 * 1000LL);
             deepSleep(0);
             return rval;
         }
@@ -239,6 +238,7 @@ public:
 
         if (fail == true) { 
             OUT("Failed to post, sleeping");
+            reportTimer.sleep(30 * 1000);
             deepSleep(30 * 1000);
         }
         if (reportLog.read().size() == 0) 
