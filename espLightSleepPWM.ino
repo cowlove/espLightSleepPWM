@@ -19,21 +19,6 @@ using std::string;
 using std::vector;
 
 JStuff j;
-
-struct {
-    int dhtGnd = 20;    // black 
-    int dhtVcc = 8;     // red
-    int dhtData1 = 9;   // orange
-    int dhtData2 = 10;  // yellow
-    int dhtData3 = 6;  // blue
-    int bv1 = 2;        // purple 
-    int bv2 = 3;        // purple 
-    int fanPwm = 4;     // blue
-    int power = 5;      // green 
-} pins;
-
-SPIFFSVariable<string> configString("/configString3", "");
-
 struct LightSleepPWM { 
     static const ledc_timer_t LEDC_LS_TIMER  = LEDC_TIMER_0;
     static const ledc_mode_t LEDC_LS_MODE = LEDC_LOW_SPEED_MODE;
@@ -81,6 +66,82 @@ struct LightSleepPWM {
     }
     int getDuty() { return ledc_get_duty(LEDC_LS_MODE, chan); }     
 } lsPwm;
+
+struct {
+    int dhtGnd = 20;    // black 
+    int dhtVcc = 8;     // red
+    int dhtData1 = 9;   // orange
+    int dhtData2 = 10;  // yellow
+    int dhtData3 = 6;  // blue
+    int bv1 = 2;        // purple 
+    int bv2 = 3;        // purple 
+    int fanPwm = 4;     // blue
+    int power = 5;      // green 
+} pins;
+
+void yieldMs(int);
+class HAL {
+public:
+    LightSleepPWM lsPwm;
+    virtual float avgAnalogRead(int p) { return ::avgAnalogRead(p); }
+    virtual void readDht(DHT *dht, float *t, float *h) {
+        *t = *h = NAN;
+        wdtReset();
+        //::digitalWrite(pins.dhtVcc, 0);
+        //yieldMs(100);
+        ::digitalWrite(pins.dhtVcc, 1);
+        //yieldMs(100);
+        for(int retries = 0; retries < 10; retries++) {
+            *h = dht->readHumidity();
+            *t = dht->readTemperature();
+            if (!isnan(*h) && !isnan(*t)) 
+                break;
+            retries++;
+            OUT("DHT read failure %lx", dht);
+            wdtReset();
+            yieldMs(500);
+        }    
+    }
+    virtual void digitalWrite(int p, int v) { ::digitalWrite(p, v); }
+    virtual int digitalRead(int p) { return ::digitalRead(p); }
+    virtual void pinMode(int p, int mode) { ::pinMode(p, mode);}    
+    virtual void setPWM(int p, int pwm) {
+        lsPwm.ledcLightSleepSetup(p, LEDC_CHANNEL_2);
+        lsPwm.ledcLightSleepSet(pwm);
+    }    
+} halHW;
+
+HAL *hal = &halHW;
+
+class HAL_esp32c3_HIL : public HAL {
+    typedef HAL Parent; 
+public:
+    float avgAnalogRead(int p)  {
+        if (p == pins.bv1) return 2500;
+        if (p == pins.bv2) return 1500;
+        return Parent::avgAnalogRead(p);
+    };
+    
+    void readDht(DHT *dht, float *t, float *h)  {
+        if (millis() % 240000 < 120000) { 
+            *t = 5;
+            *h = 80;
+        } else { 
+            *t = 16;
+            *h = 50;
+        }
+    };
+    void digitalWrite(int p, int v)  { 
+        if (p == pins.power) { 
+        }
+        Parent::digitalWrite(p, v); }
+    void setPWM(int p, int v)  {
+        Parent::setPWM(p, v);
+    };   
+} halHIL;
+    
+SPIFFSVariable<string> configString("/configString3", "");
+;
 
 class DeepSleepElapsedTime {
     SPIFFSVariable<int> bootStartMs = SPIFFSVariable<int>("/deepSleepElapsedTime", 0);
@@ -139,7 +200,7 @@ public:
             // TODO: need to collect all deepSleep calls into a sleep manager
             // that also updates the DeepSleepElapsedTime counters like reportTimer 
             // right now they get cleared 
-            digitalWrite(pins.power, 0);
+            hal->digitalWrite(pins.power, 0);
             esp_sleep_enable_timer_wakeup(sleepMin * 60 * 1000000L);
             fflush(stdout);
             uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
@@ -345,11 +406,13 @@ SleepyLogger logger;
 DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 void setup() {
+    //if (getMacAddress() == "E4B323C55708") hal = &halHIL;
+
     j.begin();
-    pinMode(pins.dhtGnd, OUTPUT);
-    digitalWrite(pins.dhtGnd, 0);
-    pinMode(pins.dhtVcc, OUTPUT);
-    digitalWrite(pins.dhtVcc, 1);
+    hal->pinMode(pins.dhtGnd, OUTPUT);
+    hal->digitalWrite(pins.dhtGnd, 0);
+    hal->pinMode(pins.dhtVcc, OUTPUT);
+    hal->digitalWrite(pins.dhtVcc, 1);
     dht1 = new DHT(pins.dhtData1, DHT22);
     dht2 = new DHT(pins.dhtData2, DHT22);
     dht3 = new DHT(pins.dhtData3, DHT22);
@@ -358,7 +421,6 @@ void setup() {
     dht3->begin();
 
     j.jw.enabled = j.mqtt.active = false;
-    lsPwm.ledcLightSleepSetup(pins.fanPwm, LEDC_CHANNEL_2);
     readConfig();
     printConfig();
     OUT("quick reboots: %d", j.quickRebootCounter.reboots());
@@ -409,35 +471,16 @@ float calcVpd(float t, float rh) {
     return vpd;
 }
 
-void readDht(DHT *dht, float *t, float *h) {
-    *t = *h = NAN;
-    wdtReset();
-    //digitalWrite(pins.dhtVcc, 0);
-    //yieldMs(100);
-    digitalWrite(pins.dhtVcc, 1);
-    //yieldMs(100);
-    for(int retries = 0; retries < 10; retries++) {
-        *h = dht->readHumidity();
-        *t = dht->readTemperature();
-        if (!isnan(*h) && !isnan(*t)) 
-            break;
-        retries++;
-        //OUT("DHT read failure %lx", dht);
-        wdtReset();
-        yieldMs(500);
-    }
-}
-
 float getVpd(DHT *dht) { 
     float t = NAN, h = NAN;
-    readDht(dht, &t, &h);
+    hal->readDht(dht, &t, &h);
     return calcVpd(t, h);
 }
 
 bool convertToJson(const DHT &dht, JsonVariant dst) { 
     DHT *p = (DHT *)&dht;
     float t, h;
-    readDht(p, &t, &h); // TMP prime DHT until we understand problems
+    hal->readDht(p, &t, &h); // TMP prime DHT until we understand problems
     dst["t"] = round(t, .01);
     dst["h"] = round(h, .01);
     dst["v"] = round(calcVpd(t, h), .01);
@@ -446,10 +489,9 @@ bool convertToJson(const DHT &dht, JsonVariant dst) {
 
 void readSensors(JsonDocument &doc) { 
     // TODO: handle stale data in Sensor::getXXX functions 
-    doc["bv1"] = round(avgAnalogRead(pins.bv1), .1);
-    doc["bv2"] = round(avgAnalogRead(pins.bv2), .1);
-    doc["power"] = digitalRead(pins.power);
-    doc["pwm"] = lsPwm.getDuty();
+    doc["bv1"] = round(hal->avgAnalogRead(pins.bv1), .1);
+    doc["bv2"] = round(hal->avgAnalogRead(pins.bv2), .1);
+    doc["power"] = hal->digitalRead(pins.power);
     doc["Tamb"] = ambientTempSensor1;
     doc["Tex1"] = *dht1;
     doc["Tex2"] = *dht2;
@@ -465,19 +507,12 @@ int pwm = 0;
 int setFan(int pwm) { 
     pwm = min(config.maxFan, max(0, pwm));
     //OUT("Turning on fan power level %d", pwm);
-    if (pwm > 0) { 
-        lsPwm.ledcLightSleepSet(pwm);
-        pinMode(pins.power, OUTPUT);
-        digitalWrite(pins.power, 1);
-    } else { 
-        pwm = 0;
-        pinMode(pins.power, OUTPUT);
-        digitalWrite(pins.power, 0);
-        lsPwm.ledcLightSleepSet(pwm);
-    }
+    int power = pwm > 0;
+    hal->pinMode(pins.power, OUTPUT);
+    hal->digitalWrite(pins.power, power);
+    hal->setPWM(pins.fanPwm, pwm); 
     return pwm;
 }
-
 
 void testLoop() {
     #if 0 
@@ -530,7 +565,7 @@ void loop() {
     int sensorWaitSec = 30;
     logger.reportTime = config.reportTime;
 
-    float bv1 = avgAnalogRead(pins.bv1);
+    float bv1 = hal->avgAnalogRead(pins.bv1);
     if (false && bv1 > 1000 && bv1 < 2000) { 
         printf("Battery too low %.1f sleeping 1 hour\n", bv1);
         deepSleep(60 * 60 * 1000);
@@ -544,10 +579,14 @@ void loop() {
     sensorServer.run();
 
     if (j.secTick(10) || j.once()) { 
-        OUT("%09.3f q %d, post age %d, min free heap %d, bv1 %.1f bv2 %.1f pwm %d power %d",
+        OUT("%09.3f Q % 2d, lastpost % 4d, snsrs seen %d, last sns rx % 3.0f, heap %d, bv1 %.1f bv2 %.1f vpd %.2f pwm %d power %d",
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
-            (int)logger.reportTimer.elapsed(), minFreeHeap, 
-            avgAnalogRead(pins.bv1), avgAnalogRead(pins.bv2), pwm, digitalRead(pins.power));
+            (int)logger.reportTimer.elapsed() / 1000, 
+            sensorServer.countSeen(), sensorServer.lastTrafficSec(), 
+            minFreeHeap, 
+            hal->avgAnalogRead(pins.bv1), hal->avgAnalogRead(pins.bv2), 
+            getVpd(dht3), pwm, 
+            hal->digitalRead(pins.power));
     }
 
     int sleepMs = sensorServer.getSleepRequest() * 1000;
@@ -598,24 +637,22 @@ void loop() {
         wakeupTime = millis();
         alreadyLogged = false;
     }
-    if (avgAnalogRead(pins.bv2) < config.minBatVolt) {
-        OUT("Disabling fan due to battery voltage %.1f/%.1f", avgAnalogRead(pins.bv2), config.minBatVolt);
+    if (hal->avgAnalogRead(pins.bv2) < config.minBatVolt) {
+        OUT("Disabling fan due to battery voltage %.1f/%.1f", hal->avgAnalogRead(pins.bv2), config.minBatVolt);
         pwm = 0;
     }
     pwm = setFan(pwm);
     sleepMs = sensorServer.getSleepRequest() * 1000 - 7000;
     if (sleepMs > 0) {
-        if (avgAnalogRead(pins.bv1) < 2200) { // charge up our LiPo this sleep
-            digitalWrite(pins.power, 1);      // TODO: pwm could still be set? 
+        if (hal->avgAnalogRead(pins.bv1) < 2200) { // charge up our LiPo this sleep
+            hal->digitalWrite(pins.power, 1);      // TODO: pwm could still be set? 
         }
         sensorServer.prepareSleep(sleepMs); 
-        if (pwm == 0 && digitalRead(pins.power) == 0) {
+        if (pwm == 0 && hal->digitalRead(pins.power) == 0) {
             logger.prepareSleep(sleepMs);
             deepSleep(sleepMs); 
             /* reboots */
         } else { 
-            digitalWrite(pins.dhtVcc, 1);
-            gpio_hold_en((gpio_num_t)pins.dhtVcc);
             gpio_hold_en((gpio_num_t)pins.power);
             lightSleep(sleepMs);
             alreadyLogged = false;
@@ -713,7 +750,7 @@ class WorldSim {
   void run() {
     now = millis();
     if (secTick(1)) { 
-        if (digitalRead(pins.power)) {
+        if (hal->digitalRead(pins.power)) {
             bv1 = min(2666.0L, bv1 + .0001L);
         } else {
             bv1 = max(900.0L, bv1 - .0001);
@@ -753,7 +790,7 @@ class Csim : public ESP32sim_Module {
         int pwm = ESP32sim_currentPwm[2];
         float salt = millis() / 10000.0;
         setSimluatedAmbientTemp(12 - salt, 40 + salt);
-        setSimluatedInteriorTemp(20, 50);
+        setSimluatedInteriorTemp(5, 80);
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);
         client1.run();
