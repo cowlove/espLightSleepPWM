@@ -427,7 +427,7 @@ void readDht(DHT *dht, float *t, float *h) {
         if (!isnan(*h) && !isnan(*t)) 
             break;
         retries++;
-        OUT("DHT read failure %lx", dht);
+        //OUT("DHT read failure %lx", dht);
         wdtReset();
         yieldMs(500);
     }
@@ -705,10 +705,8 @@ class Csim : public ESP32sim_Module {
                 dummy = *(++a);
     }
     void setup() override {
-        if (csim_flags.OneProg == false) { 
-            printf("requires --espnowOneProg\n");
-            exit(-1);
-        }
+        ESPNOW_sendHandler= new ESPNOW_csimOneProg();
+        csim_flags.OneProg = true;
         client1.csimOverrideMac("EC64C9986F2C");
     }
     void setSimluatedAmbientTemp(float t, float h) {
