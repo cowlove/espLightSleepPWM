@@ -553,7 +553,7 @@ void loop() {
     logger.reportTime = config.reportTime;
 
     float bv1 = hal->avgAnalogRead(pins.bv1);
-    if (false && bv1 > 1000 && bv1 < 2000) { 
+    if (bv1 > 1000 && bv1 < 2000) { 
         printf("Battery too low %.1f sleeping 1 hour\n", bv1);
         deepSleep(60 * 60 * 1000);
     }
@@ -755,7 +755,7 @@ class WorldSim {
         if (hal->digitalRead(pins.power)) {
             bv1 = min(2666.0L, bv1 + .00001L);
         } else {
-            bv1 = max(900.0L, bv1 - .0001);
+            bv1 = max(900.0L, bv1 - .3L);
         }
         float day = millis() / 3600000.0 / 24;
         intTA.add(max(2.0, cos(day * 2 * M_PI) * 30 - 4) + pwm * 0.3);
@@ -780,7 +780,7 @@ class Csim : public ESP32sim_Module {
             [](const char *url, const char *hdr, const char *data, string &result) {
                 // use csim_bootTime, log the data like a log file
                 // make a real timestamp
-                uint64_t nowmsec = millis() + 5LL * 365 * 24 * 3600 * 1000000;
+                uint64_t nowmsec = millis() + 5LL * 365 * 24 * 3600 * 1000000 + esp32sim.bootTimeUsec / 1000;
                 time_t nt = nowmsec / 1000;
                 struct tm *ntm = localtime(&nt);
                 char buf[64];
