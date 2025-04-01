@@ -355,6 +355,7 @@ public:
 struct Config {
     SimplePID pid;
     float sampleTime;
+    float sensorTime;
     float reportTime;
     float vpdSetPoint;
     float minBatVolt;
@@ -362,6 +363,7 @@ struct Config {
     bool convertToJson(JsonVariant dst) const {
         dst["PID"] = pid;
         dst["sampleTime"] = sampleTime;
+        dst["sensorTime"] = sensorTime;
         dst["reportTime"] = reportTime;
         dst["vpdSetPoint"] = vpdSetPoint;
         dst["minBatVolt"] = minBatVolt;
@@ -372,7 +374,8 @@ struct Config {
         pid = src["PID"];
         vpdSetPoint = src["vpdSetPoint"] | 3.6;
         sampleTime = src["sampleTime"] | 1.0;
-        reportTime = src["reportTime"] | 3.0;
+        sensorTime = src["sensorTime"] | 3.0;
+        reportTime = src["reportTime"] | 5.0;
         minBatVolt = src["minBatVolt"] | 1190;
         maxFan = src["maxFan"] | 20;
     }
@@ -481,7 +484,7 @@ void readSensors(JsonDocument &doc) {
 }
 
 bool alreadyLogged = false;
-uint32_t wakeupTime = 0;
+uint32_t sampleStartTime = 0;
 int pwm = 0;
 
 int setFan(int pwm) { 
@@ -544,9 +547,9 @@ void loop() {
     return;
 #endif
     pwm = setFan(pwm); // power keeps getting turned on???
-    sensorServer.serverSleepSeconds = config.sampleTime * 60;
-    sensorServer.serverSleepLinger = 30;
-    int sensorWaitSec = 30;
+    sensorServer.serverSleepSeconds = config.sensorTime * 60;
+    sensorServer.serverSleepLinger = 25;
+    int sensorWaitSec = min(30.0F, config.sampleTime * 60);
     logger.reportTime = config.reportTime;
 
     float bv1 = hal->avgAnalogRead(pins.bv1);
@@ -564,20 +567,20 @@ void loop() {
     sensorServer.run();
 
     if (j.secTick(10) || j.once()) { 
-        OUT("%09.3f Q % 2d, lastpost % 4d, snsrs seen %d, last sns rx % 3.0f, heap %d, bv1 %.1f bv2 %.1f vpd %.2f pwm %d power %d",
+        OUT("%09.3f Q %2d, lastpost %4d, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f heap %d, bv1 %.1f bv2 %.1f vpd %.2f pwm %d power %d",
             millis() / 1000.0, (int)logger.reportLog.read().size(), 
             (int)logger.reportTimer.elapsed() / 1000, 
-            sensorServer.countSeen(), sensorServer.lastTrafficSec(), 
+            sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             minFreeHeap, 
             hal->avgAnalogRead(pins.bv1), hal->avgAnalogRead(pins.bv2), 
             getVpd(dht3), pwm, 
             hal->digitalRead(pins.power));
     }
 
-    int sleepMs = sensorServer.getSleepRequest() * 1000;
     if (alreadyLogged == false && 
-        ((millis() - wakeupTime) > sensorWaitSec * 1000 || sleepMs > 0 || forcePost)) {
+        ((millis() - sampleStartTime) > sensorWaitSec * 1000 || sensorServer.getSleepRequest() > 0 || forcePost)) {
         alreadyLogged = true;     
+        forcePost = false;
         OUT("Evaluating VPD and fan");
         float vpdInt = getVpd(dht3);
         float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
@@ -607,7 +610,6 @@ void loop() {
 
         readSensors(doc);
         JsonDocument response = logger.log(doc, adminDoc, forcePost);
-        forcePost = false;
 
         if (response["CONFIG"]) {
             config.applyNewConfig(response["CONFIG"]);
@@ -616,10 +618,10 @@ void loop() {
         OUT("%09.3f LOGGED DATA logq %d", millis() / 1000.0, (int)logger.reportLog.read().size());
     }
     
-    if (alreadyLogged == true && millis() - wakeupTime > sensorServer.serverSleepSeconds * 1000) { 
-        // we should have slept, never got getSensorSleepRequest(), sensors must be missing
-        // reset log timer
-        wakeupTime = millis();
+    if (alreadyLogged == true && millis() - sampleStartTime > config.sampleTime * 60 * 1000) { 
+        // reset counter, will make another log event after
+        //OUT("%09.3f Resetting sampleStartTime timer for %.2f", millis()/1000.0, config.sampleTime);
+        sampleStartTime = millis();
         alreadyLogged = false;
     }
     if (hal->avgAnalogRead(pins.bv2) < config.minBatVolt) {
@@ -627,21 +629,34 @@ void loop() {
         pwm = 0;
     }
     pwm = setFan(pwm);
-    sleepMs = sensorServer.getSleepRequest() * 1000 - 7000;
-    if (sleepMs > 0) {
+    int sensorLoopSleepMs = sensorServer.getSleepRequest() * 1000 - 17000;
+    int sampleLoopSleepMs = config.sampleTime * 60 * 1000 - (millis() - sampleStartTime);
+    int sleepMs = min(sampleLoopSleepMs, sensorLoopSleepMs);
+
+    // TODO: make the sensorServer survive a deep sleep shorter than its expected deep sleep
+    // TODO: fix pwm light sleep issues
+    // TODO: for now, only light sleep if pwm == 0, busy wait otherwise
+    if (sleepMs > 0 && pwm == 0) { // can only do light sleep for now, need to continue the longer sensor server loop 
+        lightSleep(sleepMs);
+        alreadyLogged = false;
+        sampleStartTime = millis();
+    }
+
+    // DISABLED - only do light sleep for now
+    if (false && sensorLoopSleepMs > 0) {
         if (hal->avgAnalogRead(pins.bv1) < 2200) { // charge up our LiPo this sleep
             hal->digitalWrite(pins.power, 1);      // TODO: pwm could still be set? 
         }
-        sensorServer.prepareSleep(sleepMs); 
+        sensorServer.prepareSleep(sensorLoopSleepMs); 
         if (pwm == 0 && hal->digitalRead(pins.power) == 0) {
-            logger.prepareSleep(sleepMs);
-            deepSleep(sleepMs); 
+            logger.prepareSleep(sensorLoopSleepMs);
+            deepSleep(sensorLoopSleepMs); 
             /* reboots */
         } else { 
             gpio_hold_en((gpio_num_t)pins.power);
-            lightSleep(sleepMs);
+            lightSleep(sensorLoopSleepMs);
             alreadyLogged = false;
-            wakeupTime = millis();
+            sampleStartTime = millis();
         }
     }
     delay(10);
@@ -725,21 +740,32 @@ string floatRemoveTrailingZeros(string &s) {
 }
 
 #ifdef CSIM
+#include "RollingLeastSquares.h"
 class WorldSim {
     public:
-  long double bv1 = 2100, bv2 = 1500;
+  long double bv1 = 2100, bv2 = 1500, intT = 0, intH = 0, extT = 0, extH = 0;
   uint32_t lastRun = millis(), now = millis();
   bool secTick(float sec) { 
-    return now % (int)(sec * 1000) != lastRun % (int)(sec * 1000);
+    return floor(now / (int)(sec * 1000)) != floor(lastRun / (int)(sec * 1000));
   }
-  void run() {
+  RollingAverage<float, 12> intTA, intHA, extTA, extHA;
+  void run(int pwm) {
     now = millis();
-    if (secTick(1)) { 
+    if (secTick(30)) { 
         if (hal->digitalRead(pins.power)) {
             bv1 = min(2666.0L, bv1 + .00001L);
         } else {
             bv1 = max(900.0L, bv1 - .0001);
         }
+        float day = millis() / 3600000.0 / 24;
+        intTA.add(max(2.0, cos(day * 2 * M_PI) * 30 - 4) + pwm * 0.3);
+        intT = intTA.average();
+        extTA.add(max(2.0, cos(day * 2 * M_PI) * 35 - 2));
+        extT = extTA.average();
+        intHA.add(max(0.0L, 90.0 - intT * 1.6 - pwm * 3.5));
+        extHA.add(max(0.0L, 90.0 - extT * 1.6));
+        intH = intHA.average();
+        extH = extHA.average();
     }
     lastRun = millis(); 
   }  
@@ -762,7 +788,7 @@ class Csim : public ESP32sim_Module {
                 strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
                 printf("[%s.%03dZ] %s\n", buf, (int)((nowmsec % 1000)), data);
                 result = "{\"ota_ver\":\"\",\"status\":1,\""
-                 "CONFIG\":{\"PID\":\"P=1 I=1 D=1 F=1 L=0 S=0 MI=10\",\"maxFan\":25,\"sampleTime\":1,\"reportTime\":100,\"vpdSetPoint\":3.6,\"minBatVolt\":1190}}";
+                 "CONFIG\":{\"PID\":\"P=1 I=1 D=1 F=2 L=0 S=0 MI=10\",\"maxFan\":25,\"sensorTime\":30,\"sampleTime\":1,\"reportTime\":100,\"vpdSetPoint\":3.6,\"minBatVolt\":1190}}";
 
                 return 200;
             });
@@ -776,26 +802,17 @@ class Csim : public ESP32sim_Module {
     void setup() override {
         client1.csimOverrideMac("EC64C9986F2C");
     }
-    void setSimluatedAmbientTemp(float t, float h) {
-        SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
-        if (sensor) 
-            csim_dht.csim_set(sensor->dht.pin, t, h);
-    }
-    void setSimluatedInteriorTemp(float t, float h) {
-        if (dht3) 
-            csim_dht.csim_set(dht3->pin, t, h);
-    }
     void loop() override {
-        wsim.run();
         int pow = digitalRead(pins.power);
         int pwm = ESP32sim_currentPwm[2];
-        setSimluatedAmbientTemp(12, 40);
-
-        if (millis() % 2000000 > 1000000) { 
-            setSimluatedInteriorTemp(5, 80);
-        } else { 
-            setSimluatedInteriorTemp(15, 60);
-        }
+        wsim.run(pwm);
+        
+        if (dht3) 
+            csim_dht.csim_set(dht3->pin, wsim.intT, wsim.intH);
+        SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
+        if (sensor) 
+            csim_dht.csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
+        
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);
         client1.run();
@@ -813,13 +830,9 @@ public:
     };
     
     void readDht(DHT *dht, float *t, float *h)  {
-        if (millis() % 240000 < 120000) { 
-            *t = 5;
-            *h = 80;
-        } else { 
-            *t = 16;
-            *h = 50;
-        }
+        float day = millis() / 3600.0 / 24;
+        *h = 80;
+        *t = max(.4, sin(day * 2 * M_PI) * 15 - 2);
     };
     void digitalWrite(int p, int v)  { 
         if (p == pins.power) { 

@@ -5,3 +5,10 @@ csim
 *.out
 build
 build-*
+deploy.sh
+firmware.ver
+gnuplot.dat
+planedata.dat
+rdata.log
+update.bin
+
