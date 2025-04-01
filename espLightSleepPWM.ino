@@ -754,8 +754,13 @@ class Csim : public ESP32sim_Module {
             [](const char *url, const char *hdr, const char *data, string &result) {
                 // use csim_bootTime, log the data like a log file
                 // make a real timestamp
-                string ts = "2025-03-27T03:53:24.568Z"; 
-                printf("[%s] %s\n", ts.c_str(), data);
+                uint64_t nowmsec = millis() + 5LL * 365 * 24 * 3600 * 1000000;
+                time_t nt = nowmsec / 1000;
+                struct tm *ntm = localtime(&nt);
+                char buf[64];
+                //2025-03-27T03:53:24.568Z
+                strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
+                printf("[%s.%03dZ] %s\n", buf, (int)((nowmsec % 1000)), data);
                 result = "{\"ota_ver\":\"\",\"status\":1,\""
                  "CONFIG\":{\"PID\":\"P=1 I=1 D=1 F=1 L=0 S=0 MI=10\",\"maxFan\":25,\"sampleTime\":1,\"reportTime\":100,\"vpdSetPoint\":3.6,\"minBatVolt\":1190}}";
 
