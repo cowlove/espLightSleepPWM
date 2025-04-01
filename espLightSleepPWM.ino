@@ -750,6 +750,12 @@ class Csim : public ESP32sim_Module {
     Csim() {
         ESPNOW_sendHandler = new ESPNOW_csimOneProg();
         csim_flags.OneProg = true;
+        HTTPClient::csim_onPOST("http://vheavy.com/log", 
+            [](const char *url, const char *hdr, const char *data, string &result) {
+                // use csim_bootTime, log the data like a log file
+                result = "";
+                return 200;
+            });
     }
     RemoteSensorClient client1; 
     string dummy;
