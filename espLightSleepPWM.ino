@@ -183,11 +183,8 @@ public:
             // that also updates the DeepSleepElapsedTime counters like reportTimer 
             // right now they get cleared 
             hal->digitalWrite(pins.power, 0);
-            esp_sleep_enable_timer_wakeup(sleepMin * 60 * 1000000L);
-            fflush(stdout);
-            uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-            esp_light_sleep_start();
-            deepSleep(0);
+            int sleepMs = 15 * 60 * 1000;
+            deepSleep(sleepMs);
             return rval;
         }
         
@@ -281,8 +278,8 @@ public:
 
         if (fail == true) { 
             OUT("Failed to post, sleeping");
-            reportTimer.sleep(30 * 1000);
-            deepSleep(30 * 1000);
+            int sleepMs = 15 * 60 * 1000;
+            deepSleep(sleepMs);
         }
         if (reportLog.read().size() == 0) 
             reportTimer.reset();
@@ -555,7 +552,8 @@ void loop() {
     float bv1 = hal->avgAnalogRead(pins.bv1);
     if (bv1 > 1000 && bv1 < 2000) { 
         printf("Battery too low %.1f sleeping 1 hour\n", bv1);
-        deepSleep(60 * 60 * 1000);
+        int sleepMs = 60 * 60 * 1000;
+        deepSleep(sleepMs);
     }
 
     j.run();
@@ -629,17 +627,15 @@ void loop() {
         pwm = 0;
     }
     pwm = setFan(pwm);
+    // should only sleep if sensorServer.getSleepRequest() is valid and > 0.  Then sleep
+    // the minimum of the two sleep requests
     int sensorLoopSleepMs = sensorServer.getSleepRequest() * 1000 - 17000;
     int sampleLoopSleepMs = config.sampleTime * 60 * 1000 - (millis() - sampleStartTime);
     int sleepMs = min(sampleLoopSleepMs, sensorLoopSleepMs);
 
-    // TODO: make the sensorServer survive a deep sleep shorter than its expected deep sleep
-    // TODO: fix pwm light sleep issues
-    // TODO: for now, only light sleep if pwm == 0, busy wait otherwise
+    // TODO: fix pwm light sleep issues, lightSleep() currently stubbed out with busy wait 
     if (sleepMs > 0) { 
-        if (false && pwm == 0) { // can only do light sleep for now, need to continue the longer sensor server loop 
-            logger.prepareSleep(sleepMs);
-            sensorServer.prepareSleep(sleepMs);
+        if (pwm == 0) {  
             deepSleep(sleepMs);
             /* reboot */
         } else { 
@@ -650,13 +646,11 @@ void loop() {
     }
 
     // DISABLED - only do light sleep for now
-    if (false && sensorLoopSleepMs > 0) {
+    if (false && sleepMs > 0) {
         if (hal->avgAnalogRead(pins.bv1) < 2200) { // charge up our LiPo this sleep
             hal->digitalWrite(pins.power, 1);      // TODO: pwm could still be set? 
         }
-        sensorServer.prepareSleep(sensorLoopSleepMs); 
         if (pwm == 0 && hal->digitalRead(pins.power) == 0) {
-            logger.prepareSleep(sensorLoopSleepMs);
             deepSleep(sensorLoopSleepMs); 
             /* reboots */
         } else { 
@@ -693,6 +687,8 @@ void saveConfig() {
 
 void deepSleep(int ms) { 
     OUT("%09.3f DEEP SLEEP for %dms", millis() / 1000.0, ms);
+    logger.prepareSleep(ms);
+    sensorServer.prepareSleep(ms);
     esp_sleep_enable_timer_wakeup(1000LL * ms);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
@@ -822,6 +818,9 @@ class Csim : public ESP32sim_Module {
     }
     void setup() override {
         client1.csimOverrideMac("EC64C9986F2C");
+        onDeepSleep([this](uint64_t usec) {
+            client1.setPartialDeepSleep(usec);
+         });
     }
     void loop() override {
         int pow = digitalRead(pins.power);
