@@ -736,7 +736,7 @@ class WorldSim {
     now = millis();
     if (secTick(1)) { 
         if (hal->digitalRead(pins.power)) {
-            bv1 = min(2666.0L, bv1 + .0001L);
+            bv1 = min(2666.0L, bv1 + .00001L);
         } else {
             bv1 = max(900.0L, bv1 - .0001);
         }
