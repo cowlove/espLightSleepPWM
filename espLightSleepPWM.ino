@@ -636,10 +636,17 @@ void loop() {
     // TODO: make the sensorServer survive a deep sleep shorter than its expected deep sleep
     // TODO: fix pwm light sleep issues
     // TODO: for now, only light sleep if pwm == 0, busy wait otherwise
-    if (sleepMs > 0 && pwm == 0) { // can only do light sleep for now, need to continue the longer sensor server loop 
-        lightSleep(sleepMs);
-        alreadyLogged = false;
-        sampleStartTime = millis();
+    if (sleepMs > 0) { 
+        if (false && pwm == 0) { // can only do light sleep for now, need to continue the longer sensor server loop 
+            logger.prepareSleep(sleepMs);
+            sensorServer.prepareSleep(sleepMs);
+            deepSleep(sleepMs);
+            /* reboot */
+        } else { 
+            lightSleep(sleepMs);
+            alreadyLogged = false;
+            sampleStartTime = millis();
+        }        
     }
 
     // DISABLED - only do light sleep for now
@@ -742,10 +749,16 @@ string floatRemoveTrailingZeros(string &s) {
 #ifdef CSIM
 #include "RollingLeastSquares.h"
 class WorldSim {
-    public:
+public:
   long double bv1 = 2100, bv2 = 1500, intT = 0, intH = 0, extT = 0, extH = 0;
+  float speedUp = 1.0;
   uint32_t lastRun = millis(), now = millis();
-  bool secTick(float sec) { 
+  bool firstLoop = true;
+  bool secTick(float sec) {
+    if (firstLoop == true) { 
+        firstLoop = false;
+        return true;
+    } 
     return floor(now / (int)(sec * 1000)) != floor(lastRun / (int)(sec * 1000));
   }
   RollingAverage<float, 12> intTA, intHA, extTA, extHA;
@@ -753,11 +766,11 @@ class WorldSim {
     now = millis();
     if (secTick(30)) { 
         if (hal->digitalRead(pins.power)) {
-            bv1 = min(2666.0L, bv1 + .00001L);
+            bv1 = min(2666.0L, bv1 + .000003L);
         } else {
-            bv1 = max(900.0L, bv1 - .3L);
+            bv1 = max(900.0L, bv1 - .000001L);
         }
-        float day = millis() / 3600000.0 / 24;
+        float day = (millis() + esp32sim.bootTimeUsec / 1000) / 3600000.0 / 24 * speedUp;
         intTA.add(max(2.0, cos(day * 2 * M_PI) * 30 - 4) + pwm * 0.3);
         intT = intTA.average();
         extTA.add(max(2.0, cos(day * 2 * M_PI) * 35 - 2));
@@ -787,9 +800,17 @@ class Csim : public ESP32sim_Module {
                 //2025-03-27T03:53:24.568Z
                 strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
                 printf("[%s.%03dZ] %s\n", buf, (int)((nowmsec % 1000)), data);
-                result = "{\"ota_ver\":\"\",\"status\":1,\""
-                 "CONFIG\":{\"PID\":\"P=1 I=1 D=1 F=2 L=0 S=0 MI=10\",\"maxFan\":25,\"sensorTime\":30,\"sampleTime\":1,\"reportTime\":100,\"vpdSetPoint\":3.6,\"minBatVolt\":1190}}";
-
+                JsonDocument doc;
+                Config simConfig = doc["CONFIG"]; // get defaults 
+                simConfig.sensorTime = 30;
+                simConfig.sampleTime = 1;
+                simConfig.reportTime = 100;
+                simConfig.pid.fgain = 2;
+                doc["ota_ver"] = "";
+                doc["status"] = 1;
+                doc["CONFIG"] = simConfig;
+                result = "";
+                serializeJson(doc, result);
                 return 200;
             });
     }
