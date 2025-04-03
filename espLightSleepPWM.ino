@@ -10,9 +10,28 @@
 #include <esp_sleep.h>
 #endif
 
+class DeepSleepManager {
+    SPIFFSVariable<int> bootOffsetMs = SPIFFSVariable<int>("/DeepSleepManager.bootOffsetMs", 0);
+public:
+    DeepSleepManager() {
+        printf("getResetReason %d\n", getResetReason());
+        if (getResetReason(0) != 5)
+            bootOffsetMs = 0;
+    }
+    void prepareSleep(int ms) { 
+        if (getResetReason(0) != 5)
+            bootOffsetMs = 0;
+        bootOffsetMs = bootOffsetMs + ::millis() + ms;
+    }
+    uint64_t millis() {
+        return ((uint64_t)::millis()) + bootOffsetMs;
+    }
+} deepsleep;
+
 string getServerName() { 
     if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
     if (WiFi.SSID() == "ClemmyNet") return "http://192.168.68.118:8080";
+    if (WiFi.SSID() == "Station 54") return "http://192.168.68.73:8080";
     return "http://vheavy.com";
 }
 using std::string;
@@ -76,6 +95,7 @@ struct LightSleepPWM {
 //   NC                7           8        red     dhtvcc
 //   NC                21          20       blk     dhtgnd 
 
+#if defined(ARDUINO_ESP32C3_DEV) || defined(CSIM)
 struct {
     int dhtGnd = 20;    // black 
     int dhtVcc = 8;     // red
@@ -87,6 +107,22 @@ struct {
     int fanPwm = 4;     // blue
     int power = 5;      // green 
 } pins;
+#elif defined(ARDUINO_ESP32_DEV)
+struct {
+    int dhtGnd = 25;    // black 
+    int dhtVcc = 27;     // red
+    int dhtData1 = 26;   // orange
+    int dhtData2 = 26;  // yellow
+    int dhtData3 = 26;  // blue
+    int bv1 = 33;        // purple 
+    int bv2 = 35;        // purple 
+    int fanPwm = 12;     // blue
+    int power = 13;      // green 
+} pins;
+#else
+#error Unsupported board
+#endif
+
 
 void yieldMs(int);
 class HAL {
@@ -94,22 +130,24 @@ public:
     LightSleepPWM lsPwm;
     virtual float avgAnalogRead(int p) { return ::avgAnalogRead(p); }
     virtual void readDht(DHT *dht, float *t, float *h) {
+        uint32_t startMs = millis();
         *t = *h = NAN;
         wdtReset();
         //::digitalWrite(pins.dhtVcc, 0);
         //yieldMs(100);
-        ::digitalWrite(pins.dhtVcc, 1);
-        //yieldMs(100);
+        //::digitalWrite(pins.dhtVcc, 1);
+        //yieldMs(2500);
         for(int retries = 0; retries < 10; retries++) {
             *h = dht->readHumidity();
             *t = dht->readTemperature();
             if (!isnan(*h) && !isnan(*t)) 
                 break;
             retries++;
-            OUT("DHT read failure %lx", dht);
+            OUT("DHT %lx read failure", dht);
             wdtReset();
-            yieldMs(500);
-        }    
+            yieldMs(1000);
+        }
+        //OUT("DHT %lx read %.2f %.2f in %dms", dht, *t, *h, millis() - startMs);    
     }
     virtual void digitalWrite(int p, int v) { ::digitalWrite(p, v); }
     virtual int digitalRead(int p) { return ::digitalRead(p); }
@@ -199,19 +237,8 @@ public:
         HTTPClient client;
         const string url = getServerName() + "/log";
         int r = client.begin(url.c_str());
-#if 0
-        do { 
-            printf("http.begin() returned Z%d\n", r);
-            printf("http.begin() returned X%d\n", r);
-            printf("%d q %d min free heap %d free heap %d\n", 
-                __LINE__, (int)reportLog.read().size(), minFreeHeap, freeHeap());
-            fflush(stdout);
-            uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-            delay(500);
-        } while(0);
-#endif
         client.addHeader("Content-Type", "application/json");
-        OUT("%d q %d min free heap %d free heap %d", __LINE__, reportLog.read().size(), minFreeHeap, freeHeap());
+        //OUT("%d q %d min free heap %d free heap %d", __LINE__, reportLog.read().size(), minFreeHeap, freeHeap());
         fflush(stdout);
         uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
 
@@ -253,7 +280,6 @@ public:
 
             for(int retry = 0; retry < 5; retry ++) {
                 wdtReset(); 
-                OUT("POST: %s", post.c_str());
                 r = client.POST(post.c_str());
                 String resp =  client.getString();
                 deserializeJson(rval, resp.c_str());
@@ -261,8 +287,7 @@ public:
                 if (r == 200) 
                     break;
                 client.end();
-                int beginRes = client.begin(url.c_str());
-                OUT("http.begin() returned %d", beginRes);
+                client.begin(url.c_str());
                 client.addHeader("Content-Type", "application/json");
             }
             if (r != 200) {  
@@ -388,20 +413,21 @@ SleepyLogger logger;
 DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 void setup() {
-    //if (getMacAddress() == "E4B323C55708") setHITL();
-
-    j.begin();
     hal->pinMode(pins.dhtGnd, OUTPUT);
     hal->digitalWrite(pins.dhtGnd, 0);
     hal->pinMode(pins.dhtVcc, OUTPUT);
     hal->digitalWrite(pins.dhtVcc, 1);
+
+    if (getMacAddress() == "E4B323C55708") setHITL();
+    if (getMacAddress() == "A0DD6C725F8C") setHITL();
+
+    j.begin();
     dht1 = new DHT(pins.dhtData1, DHT22);
     dht2 = new DHT(pins.dhtData2, DHT22);
     dht3 = new DHT(pins.dhtData3, DHT22);
     dht1->begin();
     dht2->begin();
     dht3->begin();
-
     j.jw.enabled = j.mqtt.active = false;
     readConfig();
     printConfig();
@@ -429,7 +455,7 @@ public:
         dst["err"] = dh.temp.getRetries();
         return true;
     } 
-} ambientTempSensor1("EC64C9986F2C");
+} ambientTempSensor1("auto");
 
 RemoteSensorServer sensorServer({ &ambientTempSensor1 });
 
@@ -538,6 +564,7 @@ void testLoop() {
 // duration 
 
 int testMode = 0;
+float vpdInt;
 void loop() {
 #if 0
     testLoop();
@@ -545,7 +572,7 @@ void loop() {
 #endif
     pwm = setFan(pwm); // power keeps getting turned on???
     sensorServer.serverSleepSeconds = config.sensorTime * 60;
-    sensorServer.serverSleepLinger = 25;
+    sensorServer.serverSleepLinger = 12;
     int sensorWaitSec = min(30.0F, config.sampleTime * 60);
     logger.reportTime = config.reportTime;
 
@@ -564,25 +591,21 @@ void loop() {
     //}
     sensorServer.run();
 
-    if (j.secTick(10) || j.once()) { 
+    if (j.secTick(10) || j.once()) {
+        while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
+        vpdInt = getVpd(dht3);
         OUT("%09.3f Q %2d, lastpost %4d, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f heap %d, bv1 %.1f bv2 %.1f vpd %.2f pwm %d power %d",
-            millis() / 1000.0, (int)logger.reportLog.read().size(), 
-            (int)logger.reportTimer.elapsed() / 1000, 
+            deepsleep.millis() / 1000.0, (int)logger.reportLog.read().size(), 
+            (int)logger.reportTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             minFreeHeap, 
             hal->avgAnalogRead(pins.bv1), hal->avgAnalogRead(pins.bv2), 
-            getVpd(dht3), pwm, 
-            hal->digitalRead(pins.power));
+            vpdInt, pwm, hal->digitalRead(pins.power));
     }
 
     if (alreadyLogged == false && 
         ((millis() - sampleStartTime) > sensorWaitSec * 1000 || sensorServer.getSleepRequest() > 0 || forcePost)) {
-        alreadyLogged = true;     
-        forcePost = false;
-        OUT("Evaluating VPD and fan");
-        float vpdInt = getVpd(dht3);
         float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
-    
         if (!isnan(vpdInt) 
             && (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint)) {
             float err = vpdInt - config.vpdSetPoint;
@@ -592,7 +615,6 @@ void loop() {
             pwm = 0;
         }
         pwm = setFan(pwm);
-        OUT("Turning on fan power level %d", pwm);
 
         JsonDocument doc, adminDoc;
         adminDoc["MAC"] = getMacAddress().c_str();
@@ -600,12 +622,8 @@ void loop() {
         adminDoc["CONFIG"] = config;
         adminDoc["freeHeap"] = freeHeap();
         adminDoc["minFreeHeap"] = minFreeHeap;
-        //adminDoc["LogCount"] = (int)logger.logCount;
-        //adminDoc["PostCount"] = (int)logger.reportCount;
-
         doc["fanPwm"] = pwm;
         doc["pidI"] = round(config.pid.iSum, .001);
-
         readSensors(doc);
         JsonDocument response = logger.log(doc, adminDoc, forcePost);
 
@@ -613,7 +631,10 @@ void loop() {
             config.applyNewConfig(response["CONFIG"]);
             saveConfig();
         }
-        OUT("%09.3f LOGGED DATA logq %d", millis() / 1000.0, (int)logger.reportLog.read().size());
+        OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", millis()/1000, pwm, vpdInt, (int)logger.reportLog.read().size());
+
+        forcePost = false;
+        alreadyLogged = true;     
     }
     
     if (alreadyLogged == true && millis() - sampleStartTime > config.sampleTime * 60 * 1000) { 
@@ -635,30 +656,16 @@ void loop() {
 
     // TODO: fix pwm light sleep issues, lightSleep() currently stubbed out with busy wait 
     if (sleepMs > 0) { 
+        OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleep.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
         if (pwm == 0) {  
             deepSleep(sleepMs);
             /* reboot */
         } else { 
             lightSleep(sleepMs);
-            alreadyLogged = false;
+            alreadyLogged = false;  // TODO clean up this part that resets the loop like a reboot
             sampleStartTime = millis();
+            vpdInt = getVpd(dht3);
         }        
-    }
-
-    // DISABLED - only do light sleep for now
-    if (false && sleepMs > 0) {
-        if (hal->avgAnalogRead(pins.bv1) < 2200) { // charge up our LiPo this sleep
-            hal->digitalWrite(pins.power, 1);      // TODO: pwm could still be set? 
-        }
-        if (pwm == 0 && hal->digitalRead(pins.power) == 0) {
-            deepSleep(sensorLoopSleepMs); 
-            /* reboots */
-        } else { 
-            gpio_hold_en((gpio_num_t)pins.power);
-            lightSleep(sensorLoopSleepMs);
-            alreadyLogged = false;
-            sampleStartTime = millis();
-        }
     }
     delay(10);
 }
@@ -686,9 +693,10 @@ void saveConfig() {
 }
 
 void deepSleep(int ms) { 
-    OUT("%09.3f DEEP SLEEP for %dms", millis() / 1000.0, ms);
+    OUT("%09.3f DEEP SLEEP for %dms", deepsleep.millis() / 1000.0, ms);
     logger.prepareSleep(ms);
     sensorServer.prepareSleep(ms);
+    deepsleep.prepareSleep(ms);
     esp_sleep_enable_timer_wakeup(1000LL * ms);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
@@ -721,11 +729,11 @@ bool wifiConnect() {
     j.jw.onConnect([](){});
     j.jw.autoConnect();
     for(int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) { 
-        delay(1000);
+        delay(500);
         wdtReset();
     }
-    OUT("Connected to AP '%s' in %dms, IP=%s, channel=%d, RSSI=%d\n",
-        WiFi.SSID().c_str(), millis(), WiFi.localIP().toString().c_str(), WiFi.channel(), WiFi.RSSI());
+    OUT("Connected to AP '%s', IP=%s, channel=%d, RSSI=%d\n",
+        WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), WiFi.channel(), WiFi.RSSI());
     return WiFi.status() == WL_CONNECTED;
 }
 
@@ -736,13 +744,14 @@ void wifiDisconnect() {
 }
 
 string floatRemoveTrailingZeros(string &s) {
+#ifndef CSIM // burns up too much time in simulation
     s = regex_replace(s, regex("[.]*[0]+ "), " ");
     s = regex_replace(s, regex("[.]*[0]+\""), "\"");
     s = regex_replace(s, regex("[.]*[0]+$"), "");
+#endif
     return s;
 }
 
-#ifdef CSIM
 #include "RollingLeastSquares.h"
 class WorldSim {
 public:
@@ -760,13 +769,13 @@ public:
   RollingAverage<float, 12> intTA, intHA, extTA, extHA;
   void run(int pwm) {
     now = millis();
-    if (secTick(30)) { 
+    if (secTick(9)) { 
         if (hal->digitalRead(pins.power)) {
-            bv1 = min(2666.0L, bv1 + .000003L);
+            bv1 = min(2666.0L, bv1 + .000003L * speedUp);
         } else {
-            bv1 = max(900.0L, bv1 - .000001L);
+            bv1 = max(900.0L, bv1 - .000001L * speedUp);
         }
-        float day = (millis() + esp32sim.bootTimeUsec / 1000) / 3600000.0 / 24 * speedUp;
+        float day = deepsleep.millis() / 3600000.0 / 24 * speedUp;
         intTA.add(max(2.0, cos(day * 2 * M_PI) * 30 - 4) + pwm * 0.3);
         intT = intTA.average();
         extTA.add(max(2.0, cos(day * 2 * M_PI) * 35 - 2));
@@ -780,6 +789,7 @@ public:
   }  
 } wsim;
 
+#ifdef CSIM
 class Csim : public ESP32sim_Module {
     public:
     Csim() {
@@ -843,24 +853,29 @@ class Csim : public ESP32sim_Module {
 class HAL_esp32c3_HIL : public HAL {
     typedef HAL Parent; 
 public:
-    float avgAnalogRead(int p)  {
-        if (p == pins.bv1) return 2500;
-        if (p == pins.bv2) return 1500;
+    float avgAnalogRead(int p) override {
+        if (p == pins.bv1) return wsim.bv1;
+        if (p == pins.bv2) return wsim.bv2;
         return Parent::avgAnalogRead(p);
     };
-    
-    void readDht(DHT *dht, float *t, float *h)  {
-        float day = millis() / 3600.0 / 24;
-        *h = 80;
-        *t = max(.4, sin(day * 2 * M_PI) * 15 - 2);
-    };
-    void digitalWrite(int p, int v)  { 
-        if (p == pins.power) { 
+    void readDht(DHT *d, float *t, float *h) override {
+        if (0) { // hack for HW test setup with only 1 real DHT-
+            Parent::readDht(dht1, t, h);
+            return; 
         }
-        Parent::digitalWrite(p, v); }
-    void setPWM(int p, int v)  {
-        Parent::setPWM(p, v);
-    };   
+
+        struct BackdoorDHT { 
+            uint8_t data[5];
+            uint8_t _pin, _type;
+        };
+        BackdoorDHT *dht = (BackdoorDHT *)d;
+        wsim.speedUp = 24.0;
+        wsim.run(lsPwm.getDuty());
+        if (dht->_pin == pins.dhtData3) {
+            *t = wsim.intT;
+            *h = wsim.intH;
+        }
+    };
 } halHIL;
 
 void setHITL() { 

@@ -1,14 +1,16 @@
 #!/bin/bash 
-BOARD=esp32c3
+BOARD=${BOARD:=esp32c3}
 
 if [ "$BOARD" == "esp32" ]; then
-	BOARD_OPTS=PartitionScheme=min_spiffs
-	PORT=/dev/ttyUSB0
+	BOARD_OPTS=${BOARD_OPTS:=PartitionScheme=min_spiffs}
+	PORT=${PORT:=/dev/ttyUSB0}
 fi 
-if [ "$BOARD" == "esp32c3" ]; then 
-	BOARD_OPTS=PartitionScheme=min_spiffs,CDCOnBoot=cdc
-	PORT=/dev/ttyACM0
+if [ "$BOARD" == "esp32c3" ] || [ $BOARD == "esp32c6" ]; then 
+	BOARD_OPTS=${BOARD_OPTS:=PartitionScheme=min_spiffs,CDCOnBoot=cdc}
+	PORT=${PORT:=/dev/ttyACM0}
 fi
+
+echo Building for ${BOARD}:${BOARD_OPTS} uploading to ${PORT}
 
 # As of 3/30 8:30am this is the best working version of make_build
 
@@ -27,7 +29,7 @@ arduino-cli compile -v -b esp32:esp32:${BOARD} --build-path ${BUILDDIR} \
 
 SKETCHDIR="$BUILDDIR"
 SKETCHCPP="${SKETCHDIR}/sketch/${SKETCH}.ino.cpp"
-OUT=./build-${BOARD}.sh
+OUT=./quick-${BOARD}.sh
 
 # TODO: this is missing a link command        
 COMPILE_CMD=`egrep "[-]o ${SKETCHCPP}.o" $TMP`
