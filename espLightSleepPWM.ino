@@ -631,7 +631,7 @@ void loop() {
             config.applyNewConfig(response["CONFIG"]);
             saveConfig();
         }
-        OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", millis()/1000, pwm, vpdInt, (int)logger.reportLog.read().size());
+        OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", millis()/1000.0, pwm, vpdInt, (int)logger.reportLog.read().size());
 
         forcePost = false;
         alreadyLogged = true;     
@@ -744,11 +744,14 @@ void wifiDisconnect() {
 }
 
 string floatRemoveTrailingZeros(string &s) {
-#ifndef CSIM // burns up too much time in simulation
-    s = regex_replace(s, regex("[.]*[0]+ "), " ");
-    s = regex_replace(s, regex("[.]*[0]+\""), "\"");
-    s = regex_replace(s, regex("[.]*[0]+$"), "");
-#endif
+//#ifndef CSIM // burns up too much time in simulation
+    //s = regex_replace(s, regex("[.]*[0]+}"), "}");
+    //s = regex_replace(s, regex("[.]*[0]+,"), ",");
+    //s = regex_replace(s, regex("[.]*[0]+]"), "]");
+    s = regex_replace(s, regex("[.][0]+ "), " ");
+    s = regex_replace(s, regex("[.][0]+\""), "\"");
+    s = regex_replace(s, regex("[.][0]+,"), ",");
+//#endif
     return s;
 }
 
