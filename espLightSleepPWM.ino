@@ -18,15 +18,15 @@ public:
     void prepareSleep(int ms) { 
         bootOffsetMs = bootOffsetMs + ::millis() + ms;
     }
-    uint64_t millis() {
+    uint32_t millis() {
         if (getResetReason(0) != 5 && resetAfterHardReset == false) { 
             resetAfterHardReset = true;
             bootOffsetMs = 0;
         }
-        return ((uint64_t)::millis()) + bootOffsetMs;
+        return (::millis()) + bootOffsetMs;
     }
-    uint64_t elapsed() { return millis(); }
-    void reset() { bootOffsetMs = -((long)::millis()); }
+    uint32_t elapsed() { return this->millis(); }
+    void reset() { bootOffsetMs = -((int64_t)::millis()); }
 };
 
 DeepSleepElapsedTimer deepsleep("/deepsleep");
@@ -191,12 +191,12 @@ static inline float round(float f, float prec) {
 // TODO: avoid repeated connection attempts
 class SleepyLogger { 
 public:
-    SPIFFSVariable<vector<string>> reportLog = SPIFFSVariable<vector<string>>("/reportLog", {});
-    SPIFFSVariable<int> reportCount = SPIFFSVariable<int>("/reportCount", 0);
-    SPIFFSVariable<int> logCount = SPIFFSVariable<int>("/logCount", 0);
-    SPIFFSVariable<float> reportTime = SPIFFSVariable<float>("/reportTime", 60);
-    static const int maxLogSize = 100;
-    DeepSleepElapsedTimer reportTimer = DeepSleepElapsedTimer("/reportTimer");
+    SPIFFSVariable<vector<string>> spiffsReportLog = SPIFFSVariable<vector<string>>("/reportLog", {});
+    int postPeriodMinutes = 60;
+    // currently runs out of memory at about 100 at line 'vector<string> logs = spiffsReportLog' in post()
+    // only succeeds after reboot when set to 90 
+    static const int maxLogSize = 80; 
+    DeepSleepElapsedTimer reportTimer = DeepSleepElapsedTimer("/SL.reportTimer");
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
     SleepyLogger() {}
 
@@ -235,19 +235,21 @@ public:
 
 
         bool fail = false;
-        while(reportLog.read().size() > 0) {
+        while(spiffsReportLog.read().size() > 0) {
             fflush(stdout);
             uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-            string admin, data, post;
-            serializeJson(adminDoc, admin);
-            post = "{\"ADMIN\":" + admin + ",\"LOG\":[";
-
+            string post;
+            {   // add scope to free up admin string when we're done with it
+                string admin;
+                serializeJson(adminDoc, admin);
+                post = "{\"ADMIN\":" + admin + ",\"LOG\":[";
+            }
             int i = 0;
-            for(i = 0; i < reportLog.read().size() && i < 10; i++) { 
+            for(i = 0; i < spiffsReportLog.read().size() && i < 10; i++) { 
                 fflush(stdout);
                 uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
                 JsonDocument doc;
-                DeserializationError error = deserializeJson(doc, reportLog.read()[i]);
+                DeserializationError error = deserializeJson(doc, spiffsReportLog.read()[i]);
                 if (!error && doc[TSLP].as<int>() != 0) {
                     doc["LTO"] = round((reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0, .1)  ;
                     string s;
@@ -283,9 +285,10 @@ public:
                 break;
             }
 
-            vector<string> logs = reportLog;
+            // runs out of memory here
+            vector<string> logs = spiffsReportLog;
             logs.erase(logs.begin(), logs.begin() + i);
-            reportLog = logs;
+            spiffsReportLog = logs;
         }
         client.end();
 
@@ -294,9 +297,8 @@ public:
             int sleepMs = 15 * 60 * 1000;
             deepSleep(sleepMs);
         }
-        if (reportLog.read().size() == 0) 
+        if (spiffsReportLog.read().size() == 0) 
             reportTimer.reset();
-        reportCount = reportCount + 1;
 
         const char *ota_ver = rval["ota_ver"];
         if (ota_ver != NULL) { 
@@ -317,17 +319,22 @@ public:
     }
 
     JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
+        //OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %d", deepsleep.millis()/1000.0, forcePost, reportTimer.elapsed()/1000.0, postPeriodMinutes);
         JsonDocument result; 
-        logCount = logCount + 1;
         doc[TSLP] = reportTimer.elapsed();
         string s;
         serializeJson(doc, s);    
-        vector<string> logs = reportLog;
+        vector<string> logs = spiffsReportLog;
         logs.push_back(s);
-        if (logs.size() > maxLogSize)
+        while(logs.size() > maxLogSize)
             logs.erase(logs.begin());
-        reportLog = logs;
-        if (forcePost == true || reportTimer.elapsed() > reportTime * 60 * 1000)
+        spiffsReportLog = logs;
+        
+        if (reportTimer.elapsed() > postPeriodMinutes * 60 * 1000)
+            forcePost = true;
+        if (logs.size() == maxLogSize)
+            forcePost = true;
+        if (forcePost) 
             result = post(adminDoc);
         
         return result;
@@ -561,8 +568,8 @@ void loop() {
     pwm = setFan(pwm); // power keeps getting turned on???
     sensorServer.serverSleepSeconds = config.sensorTime * 60;
     sensorServer.serverSleepLinger = 12;
-    int sensorWaitSec = min(30.0F, config.sampleTime * 60);
-    logger.reportTime = config.reportTime;
+    int sensorWaitSec = min(10.0F, config.sampleTime * 60);
+    logger.postPeriodMinutes = config.reportTime;
 
     float bv1 = hal->avgAnalogRead(pins.bv1);
     if (bv1 > 1000 && bv1 < 2000) { 
@@ -583,8 +590,8 @@ void loop() {
     if (j.secTick(1) || j.once()) {
         while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
-        OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f heap %d, exvpd %.2f vpd %.2f pwm %d power %d",
-            deepsleep.millis() / 1000.0, (int)logger.reportLog.read().size(), 
+        OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, exvpd %.2f vpd %.2f pwm %d power %d",
+            deepsleep.millis() / 1000.0, (int)logger.spiffsReportLog.read().size(), 
             (int)logger.reportTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             ESP.getMinFreeHeap(), calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
@@ -620,7 +627,7 @@ void loop() {
             saveConfig();
         }
         OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", 
-            deepsleep.millis()/1000.0, vpdInt, (int)logger.reportLog.read().size(), pwm);
+            deepsleep.millis()/1000.0, vpdInt, (int)logger.spiffsReportLog.read().size(), pwm);
 
         forcePost = false;
         alreadyLogged = true;     

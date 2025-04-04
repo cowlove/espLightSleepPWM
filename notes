@@ -1,7 +1,12 @@
 python3 "/home/jim/.arduino15/packages/esp32/tools/esptool_py/4.5.1/esptool.py" --chip esp32c3 -p /dev/ttyACM0 erase_flash
 
 TODO: found examples [2025-03-31T00:57:46.712Z]  where power pin left high, probably 
-old code 
+old code.  Now thinking it might be buggy hardware
+
+TODO: Big cleanup of timekeeping, esp in sensorServerNetwork - change variable names
+to avoid phrases like "lastLogTime", instead use "logPeriod", "lastLogTimestampMs"
+use "Sec", "Ms", "Us" suffixes on variable names. 
+prefix spiffs varibles with "spiffs" 
 
 make csim && rm spiff/* && time ./csim --seconds 200000  | egrep '^\[' | ../simplePost/plot.sh Tint.v Tamb.v fanPwm
 
