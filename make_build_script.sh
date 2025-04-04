@@ -1,11 +1,11 @@
 #!/bin/bash 
-BOARD=${BOARD:=esp32c3}
+BOARD=${BOARD:=esp32s3}
 
 if [ "$BOARD" == "esp32" ]; then
 	BOARD_OPTS=${BOARD_OPTS:=PartitionScheme=min_spiffs}
 	PORT=${PORT:=/dev/ttyUSB0}
 fi 
-if [ "$BOARD" == "esp32c3" ] || [ $BOARD == "esp32c6" ]; then 
+if [ "$BOARD" == "esp32c3" ] || [ $BOARD == "esp32c6" ] || [ $BOARD == "esp32s3" ]; then 
 	BOARD_OPTS=${BOARD_OPTS:=PartitionScheme=min_spiffs,CDCOnBoot=cdc}
 	PORT=${PORT:=/dev/ttyACM0}
 fi

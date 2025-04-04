@@ -10,23 +10,26 @@
 #include <esp_sleep.h>
 #endif
 
-class DeepSleepManager {
-    SPIFFSVariable<int> bootOffsetMs = SPIFFSVariable<int>("/DeepSleepManager.bootOffsetMs", 0);
+class DeepSleepElapsedTimer { // use DeepSleepElapsedTimer
+    SPIFFSVariable<int64_t> bootOffsetMs;
+    bool resetAfterHardReset = false;
 public:
-    DeepSleepManager() {
-        printf("getResetReason %d\n", getResetReason());
-        if (getResetReason(0) != 5)
-            bootOffsetMs = 0;
-    }
+    DeepSleepElapsedTimer(const char *fn) : bootOffsetMs(fn, 0) {}
     void prepareSleep(int ms) { 
-        if (getResetReason(0) != 5)
-            bootOffsetMs = 0;
         bootOffsetMs = bootOffsetMs + ::millis() + ms;
     }
     uint64_t millis() {
+        if (getResetReason(0) != 5 && resetAfterHardReset == false) { 
+            resetAfterHardReset = true;
+            bootOffsetMs = 0;
+        }
         return ((uint64_t)::millis()) + bootOffsetMs;
     }
-} deepsleep;
+    uint64_t elapsed() { return millis(); }
+    void reset() { bootOffsetMs = -((long)::millis()); }
+};
+
+DeepSleepElapsedTimer deepsleep("/deepsleep");
 
 string getServerName() { 
     if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
@@ -95,7 +98,7 @@ struct LightSleepPWM {
 //   NC                7           8        red     dhtvcc
 //   NC                21          20       blk     dhtgnd 
 
-#if defined(ARDUINO_ESP32C3_DEV) || defined(CSIM)
+#if defined(ARDUINO_ESP32C3_DEV) || defined(CSIM) || defined(ARDUINO_ESP32S3_DEV)
 struct {
     int dhtGnd = 20;    // black 
     int dhtVcc = 8;     // red
@@ -163,11 +166,10 @@ void setHITL();
     
 SPIFFSVariable<string> configString("/configString3", "");
 
-class DeepSleepElapsedTime { // TODO move this into new sleep manager class 
+class DeepSleepElapsedTimerNO { // TODO move this into new sleep manager class 
     SPIFFSVariable<int> bootStartMs = SPIFFSVariable<int>("/deepSleepElapsedTime", 0);
 public:
-    DeepSleepElapsedTime() {}
-    void sleep(int msToSleep) { bootStartMs = bootStartMs + millis() + msToSleep; } 
+    void prepareSleep(int msToSleep) { bootStartMs = bootStartMs + millis() + msToSleep; } 
     int elapsed() { return bootStartMs + millis(); }
     void reset() { bootStartMs = -((int)millis()); }
 };
@@ -181,13 +183,6 @@ void deepSleep(int ms);
 void lightSleep(int ms);
 float calcVpd(float t, float h);
 string floatRemoveTrailingZeros(string &);
-volatile uint32_t minFreeHeap = 0xffffffff;
-
-uint32_t freeHeap() { 
-    uint32_t fr = ESP.getFreeHeap();
-    if (fr < minFreeHeap) minFreeHeap = fr;
-    return fr;
-}
 
 static inline float round(float f, float prec) { 
     return floor(f / prec + .5) * prec;
@@ -201,15 +196,12 @@ public:
     SPIFFSVariable<int> logCount = SPIFFSVariable<int>("/logCount", 0);
     SPIFFSVariable<float> reportTime = SPIFFSVariable<float>("/reportTime", 60);
     static const int maxLogSize = 100;
-    DeepSleepElapsedTime reportTimer;
+    DeepSleepElapsedTimer reportTimer = DeepSleepElapsedTimer("/reportTimer");
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
-    SleepyLogger() {
-        if (reportTimer.elapsed() < 1000) 
-            reportTimer.reset();
-    }
+    SleepyLogger() {}
 
     void prepareSleep(int ms) {
-        reportTimer.sleep(ms);
+        reportTimer.prepareSleep(ms);
     }
     JsonDocument post(JsonDocument adminDoc) {
         JsonDocument rval; 
@@ -238,14 +230,12 @@ public:
         const string url = getServerName() + "/log";
         int r = client.begin(url.c_str());
         client.addHeader("Content-Type", "application/json");
-        //OUT("%d q %d min free heap %d free heap %d", __LINE__, reportLog.read().size(), minFreeHeap, freeHeap());
         fflush(stdout);
         uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
 
 
         bool fail = false;
         while(reportLog.read().size() > 0) {
-            //OUT("q %d min free heap %d free heap %d", reportLog.read().size(), minFreeHeap, freeHeap());
             fflush(stdout);
             uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
             string admin, data, post;
@@ -254,8 +244,6 @@ public:
 
             int i = 0;
             for(i = 0; i < reportLog.read().size() && i < 10; i++) { 
-                //OUT("q %d item %d min free heap %d free heap %d", reportLog.read().size(), i,
-                //minFreeHeap, freeHeap());
                 fflush(stdout);
                 uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
                 JsonDocument doc;
@@ -420,6 +408,7 @@ void setup() {
 
     if (getMacAddress() == "E4B323C55708") setHITL();
     if (getMacAddress() == "A0DD6C725F8C") setHITL();
+    if (getMacAddress() == "08F9E0F6E0B0") setHITL();
 
     j.begin();
     dht1 = new DHT(pins.dhtData1, DHT22);
@@ -431,7 +420,6 @@ void setup() {
     j.jw.enabled = j.mqtt.active = false;
     readConfig();
     printConfig();
-    OUT("quick reboots: %d", j.quickRebootCounter.reboots());
     if (getResetReason(0) != 5/*DEEP SLEEP*/)
         forcePost = true;  
 }
@@ -591,18 +579,19 @@ void loop() {
     //}
     sensorServer.run();
 
-    if (j.secTick(10) || j.once()) {
+    // Serial log 
+    if (j.secTick(1) || j.once()) {
         while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
-        OUT("%09.3f Q %2d, lastpost %4d, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f heap %d, bv1 %.1f bv2 %.1f vpd %.2f pwm %d power %d",
+        OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f heap %d, exvpd %.2f vpd %.2f pwm %d power %d",
             deepsleep.millis() / 1000.0, (int)logger.reportLog.read().size(), 
             (int)logger.reportTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
-            minFreeHeap, 
-            hal->avgAnalogRead(pins.bv1), hal->avgAnalogRead(pins.bv2), 
+            ESP.getMinFreeHeap(), calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
             vpdInt, pwm, hal->digitalRead(pins.power));
     }
 
+    // Run PID loop and log data
     if (alreadyLogged == false && 
         ((millis() - sampleStartTime) > sensorWaitSec * 1000 || sensorServer.getSleepRequest() > 0 || forcePost)) {
         float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
@@ -620,8 +609,7 @@ void loop() {
         adminDoc["MAC"] = getMacAddress().c_str();
         adminDoc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
         adminDoc["CONFIG"] = config;
-        adminDoc["freeHeap"] = freeHeap();
-        adminDoc["minFreeHeap"] = minFreeHeap;
+        adminDoc["minFreeHeap"] = ESP.getMinFreeHeap();
         doc["fanPwm"] = pwm;
         doc["pidI"] = round(config.pid.iSum, .001);
         readSensors(doc);
@@ -631,12 +619,14 @@ void loop() {
             config.applyNewConfig(response["CONFIG"]);
             saveConfig();
         }
-        OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", millis()/1000.0, pwm, vpdInt, (int)logger.reportLog.read().size());
+        OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", 
+            deepsleep.millis()/1000.0, vpdInt, (int)logger.reportLog.read().size(), pwm);
 
         forcePost = false;
         alreadyLogged = true;     
     }
     
+    // Decide if & how long to sleep
     if (alreadyLogged == true && millis() - sampleStartTime > config.sampleTime * 60 * 1000) { 
         // reset counter, will make another log event after
         //OUT("%09.3f Resetting sampleStartTime timer for %.2f", millis()/1000.0, config.sampleTime);
@@ -693,7 +683,7 @@ void saveConfig() {
 }
 
 void deepSleep(int ms) { 
-    OUT("%09.3f DEEP SLEEP for %dms", deepsleep.millis() / 1000.0, ms);
+    OUT("%09.3f DEEP SLEEP for %dms was awake %dms", deepsleep.millis() / 1000.0, ms, millis()/1000.0);
     logger.prepareSleep(ms);
     sensorServer.prepareSleep(ms);
     deepsleep.prepareSleep(ms);
@@ -704,7 +694,7 @@ void deepSleep(int ms) {
 }
 
 void lightSleep(int ms) { 
-    OUT("%09.3f LIGHT SLEEP for %dms", millis() / 1000.0, ms);
+    OUT("%09.3f LIGHT SLEEP for %dms was awake %dms", deepsleep.millis() / 1000.0, ms, millis()/1000.0);
 
     // TMP can't get light sleep PWM working on ESP32C3 
     uint32_t startMs = millis();
