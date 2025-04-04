@@ -640,7 +640,7 @@ void loop() {
     pwm = setFan(pwm);
     // should only sleep if sensorServer.getSleepRequest() is valid and > 0.  Then sleep
     // the minimum of the two sleep requests
-    int sensorLoopSleepMs = sensorServer.getSleepRequest() * 1000 - 17000;
+    int sensorLoopSleepMs = sensorServer.getSleepRequest() * 1000 - 5000;
     int sampleLoopSleepMs = config.sampleTime * 60 * 1000 - (millis() - sampleStartTime);
     int sleepMs = min(sampleLoopSleepMs, sensorLoopSleepMs);
 
@@ -683,7 +683,7 @@ void saveConfig() {
 }
 
 void deepSleep(int ms) { 
-    OUT("%09.3f DEEP SLEEP for %dms was awake %dms", deepsleep.millis() / 1000.0, ms, millis()/1000.0);
+    OUT("%09.3f DEEP SLEEP for %.2f was awake %.2fs", deepsleep.millis() / 1000.0, ms/1000.0, millis()/1000.0);
     logger.prepareSleep(ms);
     sensorServer.prepareSleep(ms);
     deepsleep.prepareSleep(ms);
@@ -694,7 +694,7 @@ void deepSleep(int ms) {
 }
 
 void lightSleep(int ms) { 
-    OUT("%09.3f LIGHT SLEEP for %dms was awake %dms", deepsleep.millis() / 1000.0, ms, millis()/1000.0);
+    OUT("%09.3f LIGHT SLEEP for %.2fs was awake %.2fs", deepsleep.millis() / 1000.0, ms/1000.0, millis()/1000.0);
 
     // TMP can't get light sleep PWM working on ESP32C3 
     uint32_t startMs = millis();
