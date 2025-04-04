@@ -12,3 +12,7 @@ planedata.dat
 rdata.log
 update.bin
 
+quick-*.sh
+*.bin
+*.dat
+fs
