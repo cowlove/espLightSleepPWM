@@ -12,6 +12,96 @@
 #define LittleFS SPIFFS
 #endif
 
+// Idea
+class DeepSleepManager {
+    
+};
+
+// Idea: probably don't need this, could simply look like
+
+// bool succcss = postData(xxx)
+// spiffsConsecutiveFails = success ? 0 : spiffsConsecutiveFails + 1;
+// handlePostFail(spiffsConsecutiveFails) 
+//
+// bool success = postData(xxx);
+// failRetry.setStrategy( {
+//      {0,waitMin(2)}
+//      {1/*fail count*/, waitMin(1)/*action*/}, 
+//      {2, reboot()}, 
+//      {3, waitMin(2)}, 
+//      {4, waitMin{20}, 
+//      {5, increaseWait(2.0)},
+//      {10, sleepForever()}});
+//  failRetry.reportStatus(success);
+//  int newWaitSeconds = failRetry.getWaitSeconds();
+
+namespace FailActions {
+    class FailAction { public: float waitMin = 0; float multiplyWait = 1.0; bool reboot = false, halt = false; };
+    struct WaitMin : public FailAction { WaitMin(float minutes) { waitMin = minutes; }};
+    struct IncreaseWait : public FailAction { IncreaseWait(float mult) { multiplyWait = mult; }};
+    struct HardReboot : public FailAction { HardReboot() { reboot = true; }};
+    struct Halt : public FailAction { Halt() { halt = true; }};
+};
+
+class FailRetryInterval {
+    string prefix;
+    SPIFFSVariable<int> spiffsConsecutiveFails;
+    typedef vector<pair<int, FailActions::FailAction>> FailActionList;
+    FailActionList failStrategy;
+    float currentWaitMin;
+public:
+    float defaultWaitMin;
+    void setFailStrategy(FailActionList l) { failStrategy = l; };
+    FailRetryInterval(const string &prefix = "", float _defaultWaitMin = 0) : 
+        defaultWaitMin(_defaultWaitMin), spiffsConsecutiveFails(string("/") + prefix + "FRI.fails", 0) {}
+    int reportStatus(bool success, std::function<int(int)> f = [](int fails) { return fails; }) { 
+        spiffsConsecutiveFails = success ? 0 : spiffsConsecutiveFails + 1;
+        return f(spiffsConsecutiveFails);
+    }
+    float getWaitMinutes(float defaultMin = -1) {
+        if (defaultMin != -1) 
+            defaultWaitMin = defaultMin;
+        if (spiffsConsecutiveFails == 0) {
+            currentWaitMin = defaultWaitMin;
+            return currentWaitMin;
+        } 
+        FailActions::FailAction choice;
+        for(auto i : failStrategy) {
+            if (spiffsConsecutiveFails >= i.first)
+                choice = i.second;
+        } 
+        if (choice.reboot) ESP.restart();
+        if (choice.halt) { /*TODO*/}
+        if (choice.waitMin != -1) currentWaitMin = choice.waitMin;
+        currentWaitMin *= choice.multiplyWait;
+        return currentWaitMin; 
+    } 
+};
+
+void foo() {
+    FailRetryInterval fr("fooRetry"/*spiff prefix*/, 2.5/*defaultMinutes*/);
+    using namespace FailActions;
+    fr.setFailStrategy({
+        {1/*fail count*/, WaitMin(.5)}, 
+        {3, IncreaseWait(10.0)},
+        {5, HardReboot()},
+        {10, Halt()},
+    });
+
+    while(true) { // main loop
+        {
+            fr.defaultWaitMin = 2.0;
+            fr.reportStatus(/*success =*/true);
+            float waitMin = fr.getWaitMinutes();
+        }
+        // or
+        {
+            fr.reportStatus(/*success =*/true);
+            float waitMin = fr.getWaitMinutes(3.0/*defaultWait*/);
+        }
+    }
+}
+
 
 class DeepSleepElapsedTimer { // use DeepSleepElapsedTimer
     SPIFFSVariable<int64_t> bootOffsetMs;
@@ -169,14 +259,6 @@ void setHITL();
     
 SPIFFSVariable<string> configString("/configString3", "");
 
-class DeepSleepElapsedTimerNO { // TODO move this into new sleep manager class 
-    SPIFFSVariable<int> bootStartMs = SPIFFSVariable<int>("/deepSleepElapsedTime", 0);
-public:
-    void prepareSleep(int msToSleep) { bootStartMs = bootStartMs + millis() + msToSleep; } 
-    int elapsed() { return bootStartMs + millis(); }
-    void reset() { bootStartMs = -((int)millis()); }
-};
-
 class FileLineLogger { 
     string filename;
     int lineCount = -1;
@@ -191,7 +273,7 @@ class FileLineLogger {
         return line;
     }
 public:
-    FileLineLogger(const char *fn) : filename(fn) {}
+    FileLineLogger(const string &fn) : filename(fn) {}
     void push_back(const string &s) { 
         lineCount = getLines() + 1;
         fs::File f = LittleFS.open(filename.c_str(), "a");
@@ -323,14 +405,15 @@ static inline float round(float f, float prec) {
 // TODO: avoid repeated connection attempts
 class SleepyLogger { 
 public:
-    FileLineLogger spiffsReportLog = FileLineLogger("/reportLog");
-    int postPeriodMinutes = 60;
+    FileLineLogger spiffsReportLog;
+    FailRetryInterval postFailTimer;
     // currently runs out of memory at about 100 at line 'vector<string> logs = spiffsReportLog' in post()
     // only succeeds after reboot when set to 90 
     static const int maxLogSize = 150; 
     DeepSleepElapsedTimer reportTimer = DeepSleepElapsedTimer("/SL.reportTimer");
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
-    SleepyLogger() {}
+
+    SleepyLogger(const string &prefix = "") : spiffsReportLog(prefix + "/reportLog"), postFailTimer(prefix + "/postFailTimer") {}
 
     void prepareSleep(int ms) {
         reportTimer.prepareSleep(ms);
@@ -338,15 +421,8 @@ public:
     JsonDocument post(JsonDocument adminDoc) {
         JsonDocument rval; 
         if (!wifiConnect()) {
-            int sleepMin = 15;
-            OUT("Failed to connect, sleeping %d min", sleepMin);
-            // real light sleep, not delaySleep currently in lightSleep();
-            // TODO: need to collect all deepSleep calls into a sleep manager
-            // that also updates the DeepSleepElapsedTime counters like reportTimer 
-            // right now they get cleared 
-            hal->digitalWrite(pins.power, 0);
-            int sleepMs = 15 * 60 * 1000;
-            deepSleep(sleepMs);
+            OUT("SleepyLogger connection failed");
+            postFailTimer.reportStatus(false);
             return rval;
         }
         
@@ -431,12 +507,12 @@ public:
         client.end();
 
         if (fail == true) { 
-            OUT("Failed to post, sleeping");
-            int sleepMs = 15 * 60 * 1000;
-            deepSleep(sleepMs);
+            OUT("SleepyLogger repeat posts failed");
+            postFailTimer.reportStatus(false);
+            return rval;
         }
-        if (spiffsReportLog.size() == 0) 
-            reportTimer.reset();
+        postFailTimer.reportStatus(true);
+        reportTimer.reset();
 
         const char *ota_ver = rval["ota_ver"];
         if (ota_ver != NULL) { 
@@ -457,7 +533,8 @@ public:
     }
 
     JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
-        //OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %d", deepsleep.millis()/1000.0, forcePost, reportTimer.elapsed()/1000.0, postPeriodMinutes);
+        OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %.1f", deepsleep.millis()/1000.0, 
+        forcePost, reportTimer.elapsed()/1000.0, postFailTimer.getWaitMinutes());
         JsonDocument result; 
         doc[TSLP] = reportTimer.elapsed();
         string s;
@@ -471,10 +548,12 @@ public:
             spiffsReportLog.trimLinesFromFront(spiffsReportLog.size() - (maxLogSize - 1));
         spiffsReportLog.push_back(s);
         
-        if (reportTimer.elapsed() > postPeriodMinutes * 60 * 1000)
+        if (reportTimer.elapsed() > postFailTimer.getWaitMinutes() * 60 * 1000)
             forcePost = true;
         if (spiffsReportLog.size() == maxLogSize)
             forcePost = true;
+        //if (LittleFS.usedBytes() > LittleFS.totalBytes() / 2 - 20 *1024)
+        //    forcePost = true;
         if (forcePost) 
             result = post(adminDoc);
         
@@ -566,6 +645,15 @@ void setup() {
     dht2->begin();
     dht3->begin();
     j.jw.enabled = j.mqtt.active = false;
+    
+    using namespace FailActions;
+    logger.postFailTimer.setFailStrategy({
+        {1/*fail count*/, WaitMin(.5)}, 
+        {3, IncreaseWait(10.0)},
+        {5, HardReboot()},
+        {10, Halt()},
+    });
+
     readConfig();
     printConfig();
     if (getResetReason(0) != 5/*DEEP SLEEP*/)
@@ -710,7 +798,7 @@ void loop() {
     sensorServer.serverSleepSeconds = config.sensorTime * 60;
     sensorServer.serverSleepLinger = 12;
     int sensorWaitSec = min(10.0F, config.sampleTime * 60);
-    logger.postPeriodMinutes = config.reportTime;
+    logger.postFailTimer.defaultWaitMin = config.reportTime;
 
     float bv1 = hal->avgAnalogRead(pins.bv1);
     if (bv1 > 1000 && bv1 < 2000) { 
