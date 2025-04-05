@@ -8,7 +8,10 @@
 #include "rom/uart.h"
 #include <HTTPClient.h>
 #include <esp_sleep.h>
+#include <SPIFFS.h>
+#define LittleFS SPIFFS
 #endif
+
 
 class DeepSleepElapsedTimer { // use DeepSleepElapsedTimer
     SPIFFSVariable<int64_t> bootOffsetMs;
@@ -176,11 +179,12 @@ public:
 
 class FileLineLogger { 
     string filename;
-    string getOneLine(File &f) { 
+    int lineCount = -1;
+    string getNextLine(fs::File &f) { 
         string line;
         while(true) { 
-            char c;
-            int n = f.read((uint8_t *)&c, 1);
+            uint8_t c;
+            int n = f.read(&c, 1);
             if (n != 1 || c == '\n') break;
             line += c;
         }
@@ -189,48 +193,92 @@ class FileLineLogger {
 public:
     FileLineLogger(const char *fn) : filename(fn) {}
     void push_back(const string &s) { 
+        lineCount = getLines() + 1;
         fs::File f = LittleFS.open(filename.c_str(), "a");
-        f.write(s.c_str(), s.length());
+        f.write((uint8_t*)s.c_str(), s.length());
         f.write('\n');
     }
     string getFirstLine() { 
         fs::File f = LittleFS.open(filename.c_str(), "r");
-        return getOneLine(f);
+        return getNextLine(f);
     }
     vector<string> getFirstLines(int count) {
         fs::File f = LittleFS.open(filename.c_str(), "r");
         vector<string> rval; 
         while(count-- > 0) { 
-            string l = getOneLine(f);
+            string l = getNextLine(f);
             if(l == "") break;
             rval.push_back(l);
         }
         return rval;
     }
     void trimLinesFromFront(int count) { 
-        if (count == 0) 
+        lineCount = getLines();
+        if (count == 0) {
+            lineCount = 0;
             return;
+        }
+        vector<string> toRemove = getFirstLines(count);
+        if (toRemove.size() == 0) {
+            lineCount = 0;
+            LittleFS.remove(filename.c_str());
+            return;
+        }
+        int bytesToRemove = 0;
+        for(auto l : toRemove) {
+            bytesToRemove += l.length() + 1;
+            lineCount--;
+        }
+
+        string tempfile = filename + ".T";
+        fs::File f1 = LittleFS.open(filename.c_str(), "r");
+        fs::File f2 = LittleFS.open(tempfile.c_str(), "w");
+        f1.seek(bytesToRemove);
+        while(true) {
+            uint8_t buf[64];
+            int n = f1.read(buf, sizeof(buf));
+            if (n <= 0) break;
+            f2.write(buf, n);
+        }
+        f1.close();
+        f2.close();
+        LittleFS.remove(filename.c_str());
+        LittleFS.rename(tempfile.c_str(), filename.c_str());
+    }
+#if 0 
+    void trimLinesFromFront_notruncate(int count) { 
+        lineCount = getLines();
+        if (count == 0) {
+            lineCount = 0;
+            return;
+        }
         fs::File f = LittleFS.open(filename.c_str(), "r+");
         int origSize = getTotalBytes();
         vector<string> toRemove = getFirstLines(count);
         int bytesToRemove = 0;
-        for(auto l : toRemove) bytesToRemove += l.length() + 1;
+        for(auto l : toRemove) {
+            bytesToRemove += l.length() + 1;
+            lineCount--;
+        }
         if (bytesToRemove == origSize) { 
             f.truncate(0);
+            lineCount = 0;
             return;
         }
         int pos = 0;
         while(true) { 
-            uint8_t c;
+            uint8_t buf[64];
             f.seek(pos + bytesToRemove);
-            int n = f.read(&c, 1);
-            if (n != 1) break;
-            f.seek(pos++);
-            f.write(&c, 1);
+            int n = f.read(buf, sizeof(buf));
+            if (n <= 0) break;
+            f.seek(pos);
+            f.write(buf, n);
+            pos += n;
         }
-        f.truncate(origSize - bytesToRemove);
+        //f.truncate(origSize - bytesToRemove);
     }
-    int size() { return getSize(); } 
+#endif
+    int size() { return getLines(); } 
     int getTotalBytes() {
         fs::File f = LittleFS.open(filename.c_str(), "r");
         int count = 0;
@@ -242,16 +290,18 @@ public:
         }
         return count;
     }
-    int getSize() {
-        fs::File f = LittleFS.open(filename.c_str(), "r");
-        int count = 0;
-        while(true) { 
-            char c;
-            int n = f.read((uint8_t *)&c, 1);
-            if (n != 1) break;
-            if (c == '\n') count++;
+    int getLines() {
+        if (lineCount < 0) { 
+            fs::File f = LittleFS.open(filename.c_str(), "r");
+            lineCount = 0;
+            while(true) { 
+                char c;
+                int n = f.read((uint8_t *)&c, 1);
+                if (n != 1) break;
+                if (c == '\n') lineCount++;
+            }
         }
-        return count;
+        return lineCount;
     }
 };
 
@@ -277,7 +327,7 @@ public:
     int postPeriodMinutes = 60;
     // currently runs out of memory at about 100 at line 'vector<string> logs = spiffsReportLog' in post()
     // only succeeds after reboot when set to 90 
-    static const int maxLogSize = 80; 
+    static const int maxLogSize = 150; 
     DeepSleepElapsedTimer reportTimer = DeepSleepElapsedTimer("/SL.reportTimer");
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
     SleepyLogger() {}
@@ -681,13 +731,16 @@ void loop() {
     if (j.secTick(1) || j.once()) {
         while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
-        OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, exvpd %.2f vpd %.2f pwm %d power %d",
+        OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, "
+            "exvpd %.2f vpd %.2f pwm %d pow %d fs used %d/%d",
             deepsleep.millis() / 1000.0, (int)logger.spiffsReportLog.size(), 
             (int)logger.reportTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             ESP.getMinFreeHeap(), calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
-            vpdInt, pwm, hal->digitalRead(pins.power));
-    }
+            vpdInt, pwm, hal->digitalRead(pins.power),
+            LittleFS.usedBytes(), LittleFS.totalBytes()
+        );
+        }
 
     // Run PID loop and log data
     if (alreadyLogged == false && 
@@ -742,10 +795,15 @@ void loop() {
     int sampleLoopSleepMs = config.sampleTime * 60 * 1000 - (millis() - sampleStartTime);
     int sleepMs = min(sampleLoopSleepMs, sensorLoopSleepMs);
 
+
     // TODO: fix pwm light sleep issues, lightSleep() currently stubbed out with busy wait 
     if (sleepMs > 0) { 
         OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleep.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
-        if (pwm == 0) {  
+        bool dsleep = (pwm ==0);
+#ifdef GPROF // avoid deepsleep to make one long continuous profiling run 
+        deepSleep = false;
+#endif
+        if (dsleep) {  
             deepSleep(sleepMs);
             /* reboot */
         } else { 
