@@ -16,3 +16,4 @@ quick-*.sh
 *.bin
 *.dat
 fs
+out

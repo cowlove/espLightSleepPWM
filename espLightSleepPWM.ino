@@ -174,6 +174,68 @@ public:
     void reset() { bootStartMs = -((int)millis()); }
 };
 
+class FileLineLogger { 
+    string filename;
+public:
+    FileLineLogger(const char *fn) : filename(fn) {}
+    void push_back(const string &s) { 
+        fs::File f = LittleFS.open(filename.c_str(), "a");
+        f.write(s.c_str(), s.length());
+        f.write('\n');
+    }
+    string getFirstLine() { 
+        fs::File f = LittleFS.open(filename.c_str(), "r");
+        string line;
+        while(true) { 
+            char c;
+            int n = f.read((uint8_t *)&c, 1);
+            if (n != 1 || c == '\n') break;
+            line += c;
+        }
+        return line;
+    }
+    vector<string> getFirstLines(int count) {
+        vector<string> rval; 
+        while(count-- > 0) { 
+            string l = getFirstLine();
+            if(l == "") break;
+            rval.push_back(l);
+        }
+        return rval;
+    }
+    void trimLinesFromFront(int count) { 
+        int origSize = getSize();
+        fs::File f = LittleFS.open(filename.c_str(), "r+");
+        vector<string> toRemove = getFirstLines(count);
+        int bytesToRemove = 0;
+        for(auto l : toRemove) bytesToRemove += l.length();
+        int pos = 0;
+        while(true) { 
+            uint8_t c;
+            f.seek(pos + bytesToRemove);
+            int n = f.read(&c, 1);
+            if (n != 1) break;
+            f.seek(pos);
+            f.write(&c, 1);
+        }
+        //f.truncate(origSize - bytesToRemove);
+        f.write('\n'); // hack - no truncate, empty line marks end 
+    }
+    int size() { return getSize(); } 
+    int getSize() {
+        fs::File f = LittleFS.open(filename.c_str(), "r");
+        int count = 0;
+        while(true) { 
+            char c;
+            int n = f.read((uint8_t *)&c, 1);
+            if (n != 1) break;
+            if (n == '\n') count++;
+        }
+        return count;
+    }
+};
+
+
 bool wifiConnect();
 void wifiDisconnect();
 void readConfig(); 

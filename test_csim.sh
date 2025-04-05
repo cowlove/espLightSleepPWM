@@ -1,5 +1,8 @@
-#!/bin/bash
+#!/bin/bash -x
 
-make csim && rm spiff/* && time ./csim --seconds 200000  | egrep '^\[' | ../simplePost/plot.sh Tint.v Tamb.v fanPwm
+make csim && \
+rm -rf ./spiff/ && \
+time ./csim --seconds 200000 > ./out/csim.out && \
+cat ./out/csim.out | egrep '^\[' | ../simplePost/plot.sh Tint.v Tamb.v fanPwm
 
 
