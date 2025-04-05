@@ -176,15 +176,7 @@ public:
 
 class FileLineLogger { 
     string filename;
-public:
-    FileLineLogger(const char *fn) : filename(fn) {}
-    void push_back(const string &s) { 
-        fs::File f = LittleFS.open(filename.c_str(), "a");
-        f.write(s.c_str(), s.length());
-        f.write('\n');
-    }
-    string getFirstLine() { 
-        fs::File f = LittleFS.open(filename.c_str(), "r");
+    string getOneLine(File &f) { 
         string line;
         while(true) { 
             char c;
@@ -194,34 +186,62 @@ public:
         }
         return line;
     }
+public:
+    FileLineLogger(const char *fn) : filename(fn) {}
+    void push_back(const string &s) { 
+        fs::File f = LittleFS.open(filename.c_str(), "a");
+        f.write(s.c_str(), s.length());
+        f.write('\n');
+    }
+    string getFirstLine() { 
+        fs::File f = LittleFS.open(filename.c_str(), "r");
+        return getOneLine(f);
+    }
     vector<string> getFirstLines(int count) {
+        fs::File f = LittleFS.open(filename.c_str(), "r");
         vector<string> rval; 
         while(count-- > 0) { 
-            string l = getFirstLine();
+            string l = getOneLine(f);
             if(l == "") break;
             rval.push_back(l);
         }
         return rval;
     }
     void trimLinesFromFront(int count) { 
-        int origSize = getSize();
+        if (count == 0) 
+            return;
         fs::File f = LittleFS.open(filename.c_str(), "r+");
+        int origSize = getTotalBytes();
         vector<string> toRemove = getFirstLines(count);
         int bytesToRemove = 0;
-        for(auto l : toRemove) bytesToRemove += l.length();
+        for(auto l : toRemove) bytesToRemove += l.length() + 1;
+        if (bytesToRemove == origSize) { 
+            f.truncate(0);
+            return;
+        }
         int pos = 0;
         while(true) { 
             uint8_t c;
             f.seek(pos + bytesToRemove);
             int n = f.read(&c, 1);
             if (n != 1) break;
-            f.seek(pos);
+            f.seek(pos++);
             f.write(&c, 1);
         }
-        //f.truncate(origSize - bytesToRemove);
-        f.write('\n'); // hack - no truncate, empty line marks end 
+        f.truncate(origSize - bytesToRemove);
     }
     int size() { return getSize(); } 
+    int getTotalBytes() {
+        fs::File f = LittleFS.open(filename.c_str(), "r");
+        int count = 0;
+        while(true) { 
+            char c;
+            int n = f.read((uint8_t *)&c, 1);
+            if (n != 1) break;
+            count++;
+        }
+        return count;
+    }
     int getSize() {
         fs::File f = LittleFS.open(filename.c_str(), "r");
         int count = 0;
@@ -229,7 +249,7 @@ public:
             char c;
             int n = f.read((uint8_t *)&c, 1);
             if (n != 1) break;
-            if (n == '\n') count++;
+            if (c == '\n') count++;
         }
         return count;
     }
@@ -253,7 +273,7 @@ static inline float round(float f, float prec) {
 // TODO: avoid repeated connection attempts
 class SleepyLogger { 
 public:
-    SPIFFSVariable<vector<string>> spiffsReportLog = SPIFFSVariable<vector<string>>("/reportLog", {});
+    FileLineLogger spiffsReportLog = FileLineLogger("/reportLog");
     int postPeriodMinutes = 60;
     // currently runs out of memory at about 100 at line 'vector<string> logs = spiffsReportLog' in post()
     // only succeeds after reboot when set to 90 
@@ -297,7 +317,8 @@ public:
 
 
         bool fail = false;
-        while(spiffsReportLog.read().size() > 0) {
+        const int batchSize = 10;
+        while(spiffsReportLog.size() > 0) {
             fflush(stdout);
             uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
             string post;
@@ -307,16 +328,20 @@ public:
                 post = "{\"ADMIN\":" + admin + ",\"LOG\":[";
             }
             int i = 0;
-            for(i = 0; i < spiffsReportLog.read().size() && i < 10; i++) { 
+            bool firstLine = true;
+            vector<string> lines = spiffsReportLog.getFirstLines(batchSize);
+            for(auto i : lines) { 
+            //for(i = 0; i < spiffsReportLog.read().size() && i < 10; i++) { 
                 fflush(stdout);
                 uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
                 JsonDocument doc;
-                DeserializationError error = deserializeJson(doc, spiffsReportLog.read()[i]);
+                DeserializationError error = deserializeJson(doc, i);
                 if (!error && doc[TSLP].as<int>() != 0) {
                     doc["LTO"] = round((reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0, .1)  ;
                     string s;
                     serializeJson(doc, s);
-                    if (i != 0) post += ",";
+                    if (!firstLine) post += ",";
+                    firstLine = false;
                     post += s;
                 } 
             }
@@ -348,9 +373,10 @@ public:
             }
 
             // runs out of memory here
-            vector<string> logs = spiffsReportLog;
-            logs.erase(logs.begin(), logs.begin() + i);
-            spiffsReportLog = logs;
+            //vector<string> logs = spiffsReportLog;
+            //logs.erase(logs.begin(), logs.begin() + i);
+            //spiffsReportLog = logs;
+            spiffsReportLog.trimLinesFromFront(batchSize);
         }
         client.end();
 
@@ -359,7 +385,7 @@ public:
             int sleepMs = 15 * 60 * 1000;
             deepSleep(sleepMs);
         }
-        if (spiffsReportLog.read().size() == 0) 
+        if (spiffsReportLog.size() == 0) 
             reportTimer.reset();
 
         const char *ota_ver = rval["ota_ver"];
@@ -386,15 +412,18 @@ public:
         doc[TSLP] = reportTimer.elapsed();
         string s;
         serializeJson(doc, s);    
-        vector<string> logs = spiffsReportLog;
-        logs.push_back(s);
-        while(logs.size() > maxLogSize)
-            logs.erase(logs.begin());
-        spiffsReportLog = logs;
+        //vector<string> logs = spiffsReportLog;
+        //logs.push_back(s);
+        //while(logs.size() > maxLogSize)
+        //    logs.erase(logs.begin());
+        //spiffsReportLog = logs;
+        if (spiffsReportLog.size() > maxLogSize - 1)
+            spiffsReportLog.trimLinesFromFront(spiffsReportLog.size() - (maxLogSize - 1));
+        spiffsReportLog.push_back(s);
         
         if (reportTimer.elapsed() > postPeriodMinutes * 60 * 1000)
             forcePost = true;
-        if (logs.size() == maxLogSize)
+        if (spiffsReportLog.size() == maxLogSize)
             forcePost = true;
         if (forcePost) 
             result = post(adminDoc);
@@ -653,7 +682,7 @@ void loop() {
         while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
         OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, exvpd %.2f vpd %.2f pwm %d power %d",
-            deepsleep.millis() / 1000.0, (int)logger.spiffsReportLog.read().size(), 
+            deepsleep.millis() / 1000.0, (int)logger.spiffsReportLog.size(), 
             (int)logger.reportTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             ESP.getMinFreeHeap(), calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
@@ -689,7 +718,7 @@ void loop() {
             saveConfig();
         }
         OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", 
-            deepsleep.millis()/1000.0, vpdInt, (int)logger.spiffsReportLog.read().size(), pwm);
+            deepsleep.millis()/1000.0, vpdInt, (int)logger.spiffsReportLog.size(), pwm);
 
         forcePost = false;
         alreadyLogged = true;     
