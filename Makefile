@@ -27,7 +27,7 @@ CSIM_CPP=${HOME}/Arduino/libraries/Arduino_CRC32/src/*
 
 
 ${MAIN_NAME}_csim:  
-	g++ -g  -x c++ -fpermissive ${MAIN_NAME}.ino -o $@ -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU \
+	g++ -g -O2 -x c++ -fpermissive ${MAIN_NAME}.ino -o $@ -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU \
 	-I./  ${CSIM_INC} \
 	${CSIM_CPP}
         

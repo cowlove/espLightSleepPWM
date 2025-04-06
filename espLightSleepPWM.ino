@@ -17,28 +17,12 @@ class DeepSleepManager {
     
 };
 
-// Idea: probably don't need this, could simply look like
-
-// bool succcss = postData(xxx)
-// spiffsConsecutiveFails = success ? 0 : spiffsConsecutiveFails + 1;
-// handlePostFail(spiffsConsecutiveFails) 
-//
-// bool success = postData(xxx);
-// failRetry.setStrategy( {
-//      {0,waitMin(2)}
-//      {1/*fail count*/, waitMin(1)/*action*/}, 
-//      {2, reboot()}, 
-//      {3, waitMin(2)}, 
-//      {4, waitMin{20}, 
-//      {5, increaseWait(2.0)},
-//      {10, sleepForever()}});
-//  failRetry.reportStatus(success);
-//  int newWaitSeconds = failRetry.getWaitSeconds();
 
 namespace FailActions {
-    class FailAction { public: float waitMin = 0; float multiplyWait = 1.0; bool reboot = false, halt = false; };
+    class FailAction { public: float waitMin = -1, increase = -1, multiply = -1; bool reboot = false, halt = false; };
     struct WaitMin : public FailAction { WaitMin(float minutes) { waitMin = minutes; }};
-    struct IncreaseWait : public FailAction { IncreaseWait(float mult) { multiplyWait = mult; }};
+    struct IncreaseWait : public FailAction { IncreaseWait(float in) { increase = in; }};
+    struct MultiplyWait : public FailAction { MultiplyWait(float mu) { multiply = mu; }};
     struct HardReboot : public FailAction { HardReboot() { reboot = true; }};
     struct Halt : public FailAction { Halt() { halt = true; }};
 };
@@ -48,59 +32,42 @@ class FailRetryInterval {
     SPIFFSVariable<int> spiffsConsecutiveFails;
     typedef vector<pair<int, FailActions::FailAction>> FailActionList;
     FailActionList failStrategy;
-    float currentWaitMin;
 public:
+    int failCount() { return spiffsConsecutiveFails; }
     float defaultWaitMin;
     void setFailStrategy(FailActionList l) { failStrategy = l; };
-    FailRetryInterval(const string &prefix = "", float _defaultWaitMin = 0) : 
+    FailRetryInterval(const string &prefix = "", float _defaultWaitMin = 1) : 
         defaultWaitMin(_defaultWaitMin), spiffsConsecutiveFails(string("/") + prefix + "FRI.fails", 0) {}
-    int reportStatus(bool success, std::function<int(int)> f = [](int fails) { return fails; }) { 
+    void reportStatus(bool success) { 
         spiffsConsecutiveFails = success ? 0 : spiffsConsecutiveFails + 1;
-        return f(spiffsConsecutiveFails);
     }
     float getWaitMinutes(float defaultMin = -1) {
-        if (defaultMin != -1) 
+        if (defaultMin >= 0) 
             defaultWaitMin = defaultMin;
-        if (spiffsConsecutiveFails == 0) {
-            currentWaitMin = defaultWaitMin;
-            return currentWaitMin;
-        } 
-        FailActions::FailAction choice;
+        float waitMin = defaultWaitMin;
+
         for(auto i : failStrategy) {
-            if (spiffsConsecutiveFails >= i.first)
-                choice = i.second;
+            FailActions::FailAction action = i.second;
+            if (spiffsConsecutiveFails < i.first)
+                continue;
+            if (spiffsConsecutiveFails == i.first) { 
+                if (action.reboot) ESP.restart();
+                if (action.halt) { /*TODO*/}
+            }
+            if (spiffsConsecutiveFails >= i.first ) { 
+                if (action.waitMin != -1) waitMin = action.waitMin;
+                if (action.increase != -1) {
+                    waitMin *= action.increase * (spiffsConsecutiveFails - i.first + 1);
+                }
+                if (action.multiply != -1) {
+                    for(int n = 0; n < spiffsConsecutiveFails.read() - i.first + 1; n++) 
+                        waitMin *= action.multiply;
+                }
+            }
         } 
-        if (choice.reboot) ESP.restart();
-        if (choice.halt) { /*TODO*/}
-        if (choice.waitMin != -1) currentWaitMin = choice.waitMin;
-        currentWaitMin *= choice.multiplyWait;
-        return currentWaitMin; 
+        return waitMin; 
     } 
 };
-
-void foo() {
-    FailRetryInterval fr("fooRetry"/*spiff prefix*/, 2.5/*defaultMinutes*/);
-    using namespace FailActions;
-    fr.setFailStrategy({
-        {1/*fail count*/, WaitMin(.5)}, 
-        {3, IncreaseWait(10.0)},
-        {5, HardReboot()},
-        {10, Halt()},
-    });
-
-    while(true) { // main loop
-        {
-            fr.defaultWaitMin = 2.0;
-            fr.reportStatus(/*success =*/true);
-            float waitMin = fr.getWaitMinutes();
-        }
-        // or
-        {
-            fr.reportStatus(/*success =*/true);
-            float waitMin = fr.getWaitMinutes(3.0/*defaultWait*/);
-        }
-    }
-}
 
 
 class DeepSleepElapsedTimer { // use DeepSleepElapsedTimer
@@ -413,7 +380,9 @@ public:
     DeepSleepElapsedTimer reportTimer = DeepSleepElapsedTimer("/SL.reportTimer");
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
 
-    SleepyLogger(const string &prefix = "") : spiffsReportLog(prefix + "/reportLog"), postFailTimer(prefix + "/postFailTimer") {}
+    SleepyLogger(const string &prefix = "") : 
+        spiffsReportLog(prefix + "/reportLog"), 
+        postFailTimer(prefix + "/postFailTimer") {}
 
     void prepareSleep(int ms) {
         reportTimer.prepareSleep(ms);
@@ -423,6 +392,7 @@ public:
         if (!wifiConnect()) {
             OUT("SleepyLogger connection failed");
             postFailTimer.reportStatus(false);
+            reportTimer.reset();
             return rval;
         }
         
@@ -509,6 +479,7 @@ public:
         if (fail == true) { 
             OUT("SleepyLogger repeat posts failed");
             postFailTimer.reportStatus(false);
+            reportTimer.reset();
             return rval;
         }
         postFailTimer.reportStatus(true);
@@ -548,12 +519,15 @@ public:
             spiffsReportLog.trimLinesFromFront(spiffsReportLog.size() - (maxLogSize - 1));
         spiffsReportLog.push_back(s);
         
-        if (reportTimer.elapsed() > postFailTimer.getWaitMinutes() * 60 * 1000)
+        float waitMs = postFailTimer.getWaitMinutes() * 60 * 1000;
+        if (reportTimer.elapsed() > waitMs)
             forcePost = true;
         if (spiffsReportLog.size() == maxLogSize)
             forcePost = true;
-        //if (LittleFS.usedBytes() > LittleFS.totalBytes() / 2 - 20 *1024)
-        //    forcePost = true;
+        if (LittleFS.usedBytes() > LittleFS.totalBytes() / 2 - 20 *1024)
+            forcePost = true;
+        if (postFailTimer.failCount() > 0 && reportTimer.elapsed() < waitMs) 
+            forcePost = false;
         if (forcePost) 
             result = post(adminDoc);
         
@@ -649,9 +623,11 @@ void setup() {
     using namespace FailActions;
     logger.postFailTimer.setFailStrategy({
         {1/*fail count*/, WaitMin(.5)}, 
-        {3, IncreaseWait(10.0)},
-        {5, HardReboot()},
-        {10, Halt()},
+        {10, WaitMin(1)},
+        {15, IncreaseWait(2)},
+        {20, MultiplyWait(3)},
+        {22, HardReboot()},
+       // {10, Halt()},
     });
 
     readConfig();
@@ -855,6 +831,7 @@ void loop() {
         JsonDocument response = logger.log(doc, adminDoc, forcePost);
 
         if (response["CONFIG"]) {
+            OUT("Got new config in post respose");
             config.applyNewConfig(response["CONFIG"]);
             saveConfig();
         }
@@ -1068,6 +1045,7 @@ class Csim : public ESP32sim_Module {
         onDeepSleep([this](uint64_t usec) {
             client1.setPartialDeepSleep(usec);
          });
+         //WiFi.simulatedFailMinutes = 1;
     }
     void loop() override {
         int pow = digitalRead(pins.power);
