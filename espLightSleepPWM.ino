@@ -463,13 +463,15 @@ public:
 
             for(int retry = 0; retry < 5; retry ++) {
                 wdtReset();
+                // TODO looks like deepsleep millis() is too big 
                 uint64_t nowmsec = millis() + 5LL * 365 * 24 * 3600 * 1000000 + deepsleep.millis();
                 time_t nt = nowmsec / 1000;
                 struct tm *ntm = localtime(&nt);
                 char buf[64];
+                // TODO things arent plotting correctly in test_csim
                 //2025-03-27T03:53:24.568Z
                 strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
-                Serial.printf("[%s.%03dZ] ", buf, (int)((nowmsec % 1000)));
+                Serial.printf("XXXTODOXXX [%s.%03dZ] ", buf, (int)((nowmsec % 1000)));
  
                 Serial.println(post.c_str());
                 r = client.POST(post.c_str());
@@ -1047,8 +1049,7 @@ class Csim : public ESP32sim_Module {
                 char buf[64];
                 //2025-03-27T03:53:24.568Z
                 strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
-                // TODO things aren't plotting correctly in test_csim.sh 
-                printf("X[%s.%03dZ] %s\n", buf, (int)((nowmsec % 1000)), data);
+                printf("[%s.%03dZ] %s\n", buf, (int)((nowmsec % 1000)), data);
                 JsonDocument doc;
                 Config simConfig = doc["CONFIG"]; // get defaults 
                 simConfig.sensorTime = 30;
