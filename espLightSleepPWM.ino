@@ -464,14 +464,14 @@ public:
             for(int retry = 0; retry < 5; retry ++) {
                 wdtReset();
                 // TODO looks like deepsleep millis() is too big 
-                uint64_t nowmsec = millis() + 5LL * 365 * 24 * 3600 * 1000000 + deepsleep.millis();
+                uint64_t nowmsec = deepsleep.millis() + 5LL * 365 * 24 * 3600 * 1000000;
                 time_t nt = nowmsec / 1000;
                 struct tm *ntm = localtime(&nt);
                 char buf[64];
                 // TODO things arent plotting correctly in test_csim
                 //2025-03-27T03:53:24.568Z
                 strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
-                Serial.printf("XXXTODOXXX [%s.%03dZ] ", buf, (int)((nowmsec % 1000)));
+                Serial.printf("[%s.%03dZ] ", buf, (int)((nowmsec % 1000)));
  
                 Serial.println(post.c_str());
                 r = client.POST(post.c_str());
@@ -946,6 +946,7 @@ void deepSleep(int ms) {
 void lightSleep(int ms) { 
     OUT("%09.3f LIGHT SLEEP for %.2fs was awake %.2fs", deepsleep.millis() / 1000.0, ms/1000.0, millis()/1000.0);
 
+#ifndef CSIM
     // TMP can't get light sleep PWM working on ESP32C3 
     uint32_t startMs = millis();
     while(millis() - startMs < ms) { 
@@ -954,7 +955,7 @@ void lightSleep(int ms) {
         sensorServer.run(); // might as well as long as we're not sleeping
     }
     return;
-
+#endif
     esp_sleep_enable_timer_wakeup(ms * 1000L);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
@@ -1010,7 +1011,7 @@ public:
     } 
     return floor(now / (int)(sec * 1000)) != floor(lastRun / (int)(sec * 1000));
   }
-  RollingAverage<float, 53> intTA, intHA, extTA, extHA;
+  RollingAverage<float, 8> intTA, intHA, extTA, extHA;
   void run(int pwm) {
     now = millis();
     if (secTick(9)) { 
@@ -1041,15 +1042,6 @@ class Csim : public ESP32sim_Module {
         csim_flags.OneProg = true;
         HTTPClient::csim_onPOST("http://.*/log", 
             [](const char *url, const char *hdr, const char *data, string &result) {
-                // use csim_bootTime, log the data like a log file
-                // make a real timestamp
-                uint64_t nowmsec = millis() + 5LL * 365 * 24 * 3600 * 1000000 + esp32sim.bootTimeUsec / 1000;
-                time_t nt = nowmsec / 1000;
-                struct tm *ntm = localtime(&nt);
-                char buf[64];
-                //2025-03-27T03:53:24.568Z
-                strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
-                printf("[%s.%03dZ] %s\n", buf, (int)((nowmsec % 1000)), data);
                 JsonDocument doc;
                 Config simConfig = doc["CONFIG"]; // get defaults 
                 simConfig.sensorTime = 30;
