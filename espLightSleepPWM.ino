@@ -54,9 +54,12 @@ public:
                 if (action.reboot) ESP.restart();
                 if (action.halt) { /*TODO*/}
             }
+            // TODO BROKEN: these actions incorrectly apply to ALL later fail counts,
+            // should only apply to the failures between *i and the next rule
             if (spiffsConsecutiveFails >= i.first ) { 
                 if (action.waitMin != -1) waitMin = action.waitMin;
                 if (action.increase != -1) {
+
                     waitMin *= action.increase * (spiffsConsecutiveFails - i.first + 1);
                 }
                 if (action.multiply != -1) {
@@ -866,7 +869,7 @@ void loop() {
         OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleep.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
         bool dsleep = (pwm ==0);
 #ifdef GPROF // avoid deepsleep to make one long continuous profiling run 
-        deepSleep = false;
+        dsleep = false;
 #endif
         if (dsleep) {  
             deepSleep(sleepMs);
@@ -955,14 +958,14 @@ void wifiDisconnect() {
 }
 
 string floatRemoveTrailingZeros(string &s) {
-//#ifndef CSIM // burns up too much time in simulation
+#ifndef CSIM // burns up too much time in simulation
     //s = regex_replace(s, regex("[.]*[0]+}"), "}");
     //s = regex_replace(s, regex("[.]*[0]+,"), ",");
     //s = regex_replace(s, regex("[.]*[0]+]"), "]");
     s = regex_replace(s, regex("[.][0]+ "), " ");
     s = regex_replace(s, regex("[.][0]+\""), "\"");
     s = regex_replace(s, regex("[.][0]+,"), ",");
-//#endif
+#endif
     return s;
 }
 
@@ -980,7 +983,7 @@ public:
     } 
     return floor(now / (int)(sec * 1000)) != floor(lastRun / (int)(sec * 1000));
   }
-  RollingAverage<float, 12> intTA, intHA, extTA, extHA;
+  RollingAverage<float, 53> intTA, intHA, extTA, extHA;
   void run(int pwm) {
     now = millis();
     if (secTick(9)) { 
