@@ -1,4 +1,5 @@
 #!/bin/bash 
+BOARD=${BOARD:=$B}
 BOARD=${BOARD:=esp32s3}
 
 if [ "$BOARD" == "esp32" ]; then

@@ -19,12 +19,14 @@ class DeepSleepManager {
 
 
 namespace FailActions {
-    class FailAction { public: float waitMin = -1, increase = -1, multiply = -1; bool reboot = false, halt = false; };
+    typedef std::function<void()> FailCallback;
+    class FailAction { public: FailCallback func = [](){}; float waitMin = -1, increase = -1, multiply = -1; bool reboot = false, halt = false; };
     struct WaitMin : public FailAction { WaitMin(float minutes) { waitMin = minutes; }};
     struct IncreaseWait : public FailAction { IncreaseWait(float in) { increase = in; }};
     struct MultiplyWait : public FailAction { MultiplyWait(float mu) { multiply = mu; }};
     struct HardReboot : public FailAction { HardReboot() { reboot = true; }};
     struct Halt : public FailAction { Halt() { halt = true; }};
+    struct Callback : public FailAction { Callback(FailCallback f) { func = f; }};
 };
 
 class FailRetryInterval {
@@ -34,6 +36,7 @@ class FailRetryInterval {
     FailActionList failStrategy;
 public:
     int failCount() { return spiffsConsecutiveFails; }
+    void reset() { spiffsConsecutiveFails = 0; }
     float defaultWaitMin;
     void setFailStrategy(FailActionList l) { failStrategy = l; };
     FailRetryInterval(const string &prefix = "", float _defaultWaitMin = 1) : 
@@ -53,6 +56,7 @@ public:
             if (spiffsConsecutiveFails == i.first) { 
                 if (action.reboot) ESP.restart();
                 if (action.halt) { /*TODO*/}
+                action.func();
             }
             // TODO BROKEN: these actions incorrectly apply to ALL later fail counts,
             // should only apply to the failures between *i and the next rule
@@ -97,7 +101,7 @@ DeepSleepElapsedTimer deepsleep("/deepsleep");
 string getServerName() { 
     if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
     if (WiFi.SSID() == "ClemmyNet") return "http://192.168.68.118:8080";
-    if (WiFi.SSID() == "Station 54") return "http://192.168.68.73:8080";
+    if (WiFi.SSID() == "Station 54") return "http://192.168.68.71:8080";
     return "http://vheavy.com";
 }
 using std::string;
@@ -399,10 +403,13 @@ public:
             return rval;
         }
         
+        String ssid = WiFi.SSID();
+        String ip = WiFi.localIP().toString();
+        String mac = getMacAddress();
         adminDoc["GIT"] = GIT_VERSION;
-        adminDoc["MAC"] = getMacAddress().c_str(); 
-        adminDoc["SSID"] = WiFi.SSID().c_str();
-        adminDoc["IP"] =  WiFi.localIP().toString().c_str(); 
+        adminDoc["MAC"] = mac.c_str(); 
+        adminDoc["SSID"] = ssid.c_str();
+        adminDoc["IP"] =  ip.c_str();
         adminDoc["RSSI"] = WiFi.RSSI();
         adminDoc["ARCH"] = ARDUINO_VARIANT;
         //adminDoc["AVER"] = ESP_ARDUINO_VERSION_STR;
@@ -455,7 +462,16 @@ public:
             serializeJson(tmp, post);
 
             for(int retry = 0; retry < 5; retry ++) {
-                wdtReset(); 
+                wdtReset();
+                uint64_t nowmsec = millis() + 5LL * 365 * 24 * 3600 * 1000000 + deepsleep.millis();
+                time_t nt = nowmsec / 1000;
+                struct tm *ntm = localtime(&nt);
+                char buf[64];
+                //2025-03-27T03:53:24.568Z
+                strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
+                Serial.printf("[%s.%03dZ] ", buf, (int)((nowmsec % 1000)));
+ 
+                Serial.println(post.c_str());
                 r = client.POST(post.c_str());
                 String resp =  client.getString();
                 deserializeJson(rval, resp.c_str());
@@ -626,6 +642,11 @@ void setup() {
     using namespace FailActions;
     logger.postFailTimer.setFailStrategy({
         {1/*fail count*/, WaitMin(.5)}, 
+        {5, Callback([](){
+            OUT("Too many failures, formatting flash and resetting");
+            LittleFS.format();
+            ESP.restart();
+        })},
         {10, WaitMin(1)},
         {15, IncreaseWait(2)},
         {20, MultiplyWait(3)},
@@ -635,8 +656,10 @@ void setup() {
 
     readConfig();
     printConfig();
-    if (getResetReason(0) != 5/*DEEP SLEEP*/)
+    if (getResetReason(0) != 5/*DEEP SLEEP*/) { 
         forcePost = true;  
+        logger.postFailTimer.reset();
+    }
 }
 
 class RemoteSensorModuleDHT : public RemoteSensorModule {
@@ -824,8 +847,9 @@ void loop() {
         pwm = setFan(pwm);
 
         JsonDocument doc, adminDoc;
-        adminDoc["MAC"] = getMacAddress().c_str();
-        adminDoc["PROG"] = basename_strip_ext(__BASE_FILE__).c_str();
+        String mac = getMacAddress(), base = basename_strip_ext(__BASE_FILE__);
+        adminDoc["MAC"] = mac.c_str();
+        adminDoc["PROG"] = base.c_str();
         adminDoc["CONFIG"] = config;
         adminDoc["minFreeHeap"] = ESP.getMinFreeHeap();
         doc["fanPwm"] = pwm;
@@ -946,8 +970,9 @@ bool wifiConnect() {
         delay(500);
         wdtReset();
     }
+    String ssid = WiFi.SSID(), ip = WiFi.localIP().toString();
     OUT("Connected to AP '%s', IP=%s, channel=%d, RSSI=%d\n",
-        WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), WiFi.channel(), WiFi.RSSI());
+        ssid.c_str(), ip.c_str(), WiFi.channel(), WiFi.RSSI());
     return WiFi.status() == WL_CONNECTED;
 }
 
@@ -1022,7 +1047,8 @@ class Csim : public ESP32sim_Module {
                 char buf[64];
                 //2025-03-27T03:53:24.568Z
                 strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
-                printf("[%s.%03dZ] %s\n", buf, (int)((nowmsec % 1000)), data);
+                // TODO things aren't plotting correctly in test_csim.sh 
+                printf("X[%s.%03dZ] %s\n", buf, (int)((nowmsec % 1000)), data);
                 JsonDocument doc;
                 Config simConfig = doc["CONFIG"]; // get defaults 
                 simConfig.sensorTime = 30;
