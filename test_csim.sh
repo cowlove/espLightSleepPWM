@@ -11,7 +11,7 @@ fi
 if [[ $OPT == *r* ]]; then
 echo Running... 
 rm -rf ./spiff/ && \
-time ./csim --seconds 200000 > ./out/csim.out 
+time ./csim --seconds 500000 > ./out/csim.out 
 fi
 
 if [[ $OPT == *p* ]]; then 
