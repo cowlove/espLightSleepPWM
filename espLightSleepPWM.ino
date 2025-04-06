@@ -8,8 +8,10 @@
 #include "rom/uart.h"
 #include <HTTPClient.h>
 #include <esp_sleep.h>
-#include <SPIFFS.h>
-#define LittleFS SPIFFS
+
+#include <LittleFS.h>
+//#include <SPIFFS.h>
+//#define LittleFS SPIFFS
 #endif
 
 // Idea
@@ -242,7 +244,7 @@ class FileLineLogger {
             uint8_t c;
             int n = f.read(&c, 1);
             if (n != 1 || c == '\n') break;
-            line += c;
+            if (c != '\0') line += c;
         }
         return line;
     }
@@ -268,7 +270,7 @@ public:
         }
         return rval;
     }
-    void trimLinesFromFront(int count) { 
+    void trimLinesFromFrontCopy(int count) { 
         lineCount = getLines();
         if (count == 0) {
             lineCount = 0;
@@ -301,13 +303,16 @@ public:
         LittleFS.remove(filename.c_str());
         LittleFS.rename(tempfile.c_str(), filename.c_str());
     }
-#if 0 
-    void trimLinesFromFront_notruncate(int count) { 
+ 
+    // works in simulation, screws up on hardware 
+    void trimLinesFromFront_ZeroPad(int count) { 
+        LP();
         lineCount = getLines();
         if (count == 0) {
-            lineCount = 0;
+            LittleFS.remove(filename.c_str());
             return;
         }
+        LP();
         fs::File f = LittleFS.open(filename.c_str(), "r+");
         int origSize = getTotalBytes();
         vector<string> toRemove = getFirstLines(count);
@@ -316,24 +321,53 @@ public:
             bytesToRemove += l.length() + 1;
             lineCount--;
         }
+        LP();
         if (bytesToRemove == origSize) { 
-            f.truncate(0);
             lineCount = 0;
+            f.close();
+            LittleFS.remove(filename.c_str());
             return;
         }
+        LP();
         int pos = 0;
+        int fileSz = f.size();
+        
+        fs::File f2 = LittleFS.open(filename.c_str(), "r+");
         while(true) { 
-            uint8_t buf[64];
+            wdtReset();
+            OUT("%d %d %d %d", pos, bytesToRemove, origSize, fileSz);
+            uint8_t buf[256];
             f.seek(pos + bytesToRemove);
             int n = f.read(buf, sizeof(buf));
+            OUT("read() returned %d", n);
             if (n <= 0) break;
-            f.seek(pos);
-            f.write(buf, n);
+            f2.seek(pos);
+            f2.write(buf, n);
             pos += n;
         }
-        //f.truncate(origSize - bytesToRemove);
+        f2.close();
+        LP();
+
+        // can't truncate, just pad the end with zeros
+        // f.truncate(origSize - bytesToRemove);
+        {    
+            f.seek(origSize - bytesToRemove);  
+            pos = origSize - bytesToRemove;; 
+            int fileSz = f.size();
+            OUT("file size %d", fileSz);
+            while(pos < fileSz) { 
+                uint8_t c = '\0';
+                f.write(&c, 1);
+                pos++;
+            }
+        }
+        LP();
     }
-#endif
+
+    void trimLinesFromFront(int count) { trimLinesFromFrontCopy(count); }
+    //void trimLinesFromFront(int count) { trimLinesFromFront_ZeroPad(count); }
+
+
     int size() { return getLines(); } 
     int getTotalBytes() {
         fs::File f = LittleFS.open(filename.c_str(), "r");
@@ -342,7 +376,7 @@ public:
             char c;
             int n = f.read((uint8_t *)&c, 1);
             if (n != 1) break;
-            count++;
+            if (c != '\0') count++;
         }
         return count;
     }
@@ -372,7 +406,7 @@ void lightSleep(int ms);
 float calcVpd(float t, float h);
 string floatRemoveTrailingZeros(string &);
 
-static inline float round(float f, float prec) { 
+static inline float round(float f, float prec) {
     return floor(f / prec + .5) * prec;
 }
 
