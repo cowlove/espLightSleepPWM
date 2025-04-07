@@ -19,6 +19,10 @@ class DeepSleepManager {
     
 };
 
+#ifndef OUT
+void out(const char *f, ...) {}
+#define OUT
+#endif
 
 namespace FailActions {
     typedef std::function<void()> FailCallback;
@@ -419,7 +423,8 @@ public:
     // currently runs out of memory at about 100 at line 'vector<string> logs = spiffsReportLog' in post()
     // only succeeds after reboot when set to 90 
     static const int maxLogSize = 150; 
-    DeepSleepElapsedTimer reportTimer = DeepSleepElapsedTimer("/SL.reportTimer");
+    DeepSleepElapsedTimer postPeriodTimer = DeepSleepElapsedTimer("/SL.reportTimer");
+    DeepSleepElapsedTimer firstLogAgeMs = DeepSleepElapsedTimer("/SL.log0Age");
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
 
     SleepyLogger(const string &prefix = "") : 
@@ -427,14 +432,22 @@ public:
         postFailTimer(prefix + "/postFailTimer") {}
 
     void prepareSleep(int ms) {
-        reportTimer.prepareSleep(ms);
+        postPeriodTimer.prepareSleep(ms);
+        firstLogAgeMs.prepareSleep(ms);
     }
     JsonDocument post(JsonDocument adminDoc) {
         JsonDocument rval; 
         if (!wifiConnect()) {
+            // broken you can't reset the report timer with TSLP values still in the log
+            // TODO: add seperate postPeriodMin for timing reports and firstLogTs 
+            // for measuring the age of reports.  firstLogTs is only reset when the log is empty
+            // and the first post is made   
+            // If stale logs are found after a hard boot, firstLogTs can be artificially set to be in
+            // the past by the amount of the largest TSLP value found in the stale long
+            // 
+            // maybe firstLogAgeMin would be clearer
             OUT("SleepyLogger connection failed");
             postFailTimer.reportStatus(false);
-            reportTimer.reset();
             return rval;
         }
         
@@ -478,7 +491,9 @@ public:
                 JsonDocument doc;
                 DeserializationError error = deserializeJson(doc, i);
                 if (!error && doc[TSLP].as<int>() != 0) {
-                    doc["LTO"] = round((reportTimer.elapsed() - doc[TSLP].as<int>()) / 1000.0, .1)  ;
+                    uint32_t fpa = firstLogAgeMs.elapsed();
+                    doc["LTO"] = round((fpa - doc[TSLP].as<int>()) / 1000.0, .1);
+                    doc["FPA"] = fpa;
                     string s;
                     serializeJson(doc, s);
                     if (!firstLine) post += ",";
@@ -493,32 +508,32 @@ public:
             JsonDocument tmp;
             DeserializationError error = deserializeJson(tmp, post);
             JsonArray a = tmp["LOG"].as<JsonArray>();
-            for(JsonVariant v : a) v.remove(TSLP);
+            //for(JsonVariant v : a) v.remove(TSLP);
             serializeJson(tmp, post);
 
             for(int retry = 0; retry < 5; retry ++) {
                 wdtReset();
-                // TODO looks like deepsleep millis() is too big 
                 r = client.POST(post.c_str());
                 String resp =  client.getString();
                 deserializeJson(rval, resp.c_str());
 
-                // log the line to serial for data plotting tools 
-                uint64_t nowmsec = (uint64_t)deepsleep.millis() + 5ULL * 365ULL * 24ULL * 3600ULL * 1000000ULL;
-                time_t nt = nowmsec / 1000;
+                // Print the log line to serial for data plotting tools 
+                uint64_t nowmsec = (uint64_t)deepsleep.millis() + 52ULL * 365ULL * 24ULL * 3600ULL * 1000ULL;
+                time_t nt = nowmsec / 1000ULL;
                 struct tm *ntm = localtime(&nt);
                 char buf[64];
-                // TODO things arent plotting correctly in test_csim
                 //2025-03-27T03:53:24.568Z
                 if (r != 200) Serial.printf("ERROR:"); // prefix to spoil the line for data plotting tools 
                 strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
                 Serial.printf("[%s.%03dZ] ", buf, (int)((nowmsec % 1000)));
                 Serial.println(post.c_str());
-
                 OUT("http.POST returned %d: %s", r, resp.c_str());
                 if (r == 200) 
                     break;
                 client.end();
+                wifiDisconnect();
+                delay(1000);
+                wifiConnect();
                 client.begin(url.c_str());
                 client.addHeader("Content-Type", "application/json");
             }
@@ -538,11 +553,10 @@ public:
         if (fail == true) { 
             OUT("SleepyLogger repeat posts failed");
             postFailTimer.reportStatus(false);
-            reportTimer.reset();
             return rval;
         }
         postFailTimer.reportStatus(true);
-        reportTimer.reset();
+        postPeriodTimer.reset();
 
         const char *ota_ver = rval["ota_ver"];
         if (ota_ver != NULL) { 
@@ -564,9 +578,12 @@ public:
 
     JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
         OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %.1f", deepsleep.millis()/1000.0, 
-        forcePost, reportTimer.elapsed()/1000.0, postFailTimer.getWaitMinutes());
+        forcePost, postPeriodTimer.elapsed()/1000.0, postFailTimer.getWaitMinutes());
+
+        if (spiffsReportLog.size() == 0)
+            firstLogAgeMs.reset();
         JsonDocument result; 
-        doc[TSLP] = reportTimer.elapsed();
+        doc[TSLP] = firstLogAgeMs.elapsed();
         string s;
         serializeJson(doc, s);    
         //vector<string> logs = spiffsReportLog;
@@ -579,13 +596,13 @@ public:
         spiffsReportLog.push_back(s);
         
         float waitMs = postFailTimer.getWaitMinutes() * 60 * 1000;
-        if (reportTimer.elapsed() > waitMs)
+        if (postPeriodTimer.elapsed() > waitMs)
             forcePost = true;
         if (spiffsReportLog.size() == maxLogSize)
             forcePost = true;
         if (LittleFS.usedBytes() > LittleFS.totalBytes() / 2 - 20 *1024)
             forcePost = true;
-        if (postFailTimer.failCount() > 0 && reportTimer.elapsed() < waitMs) 
+        if (postFailTimer.failCount() > 0 && postPeriodTimer.elapsed() < waitMs) 
             forcePost = false;
         if (forcePost) 
             result = post(adminDoc);
@@ -682,13 +699,13 @@ void setup() {
     using namespace FailActions;
     logger.postFailTimer.setFailStrategy({
         {1/*fail count*/, WaitMin(.5)}, 
-        {5, Callback([](){
+        {3, WaitMin(1)},
+        {5, IncreaseWait(2)},
+        {10, Callback([](){
             OUT("Too many failures, formatting flash and resetting");
             LittleFS.format();
             ESP.restart();
         })},
-        {10, WaitMin(1)},
-        {15, IncreaseWait(2)},
         {20, MultiplyWait(3)},
         {22, HardReboot()},
        // {10, Halt()},
@@ -696,6 +713,7 @@ void setup() {
 
     readConfig();
     printConfig();
+    OUT("REBOOT REASON %d", getResetReason(0));
     if (getResetReason(0) != 5/*DEEP SLEEP*/) { 
         forcePost = true;  
         logger.postFailTimer.reset();
@@ -864,7 +882,7 @@ void loop() {
         OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, "
             "exvpd %.2f vpd %.2f pwm %d pow %d fs used %d/%d",
             deepsleep.millis() / 1000.0, (int)logger.spiffsReportLog.size(), 
-            (int)logger.reportTimer.elapsed() / 1000.0, 
+            (int)logger.postPeriodTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             ESP.getMinFreeHeap(), calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
             vpdInt, pwm, hal->digitalRead(pins.power),
