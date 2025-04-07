@@ -25,9 +25,10 @@ CSIM_INC=-I${HOME}/Arduino/libraries/ArduinoJson/src/ -I${HOME}/Arduino/librarie
 
 CSIM_CPP=${HOME}/Arduino/libraries/Arduino_CRC32/src/* 	
 
-#CSIM_CFLAGS=-pg -DGPROF=1
+CSIM_CFLAGS=-pg -DGPROF=1
+CSIM_OFLAGS=-O2
 ${MAIN_NAME}_csim:  
-	g++ -g -O2 -x c++ ${CSIM_CFLAGS} -fpermissive ${MAIN_NAME}.ino -o $@ -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU \
+	g++ -g ${CSIM_OFLAGS} -x c++ ${CSIM_CFLAGS} -fpermissive ${MAIN_NAME}.ino -o $@ -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU \
 	-I./   ${CSIM_INC}  \
 	${CSIM_CPP}
         

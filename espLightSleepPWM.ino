@@ -14,12 +14,8 @@
 //#define LittleFS SPIFFS
 #endif
 
-#ifndef OUT
-void out(const char *f, ...) {}
-#define OUT
-#endif
-
 JStuff j;
+
 // Idea
 class DeepSleepManager {
     
@@ -240,9 +236,11 @@ public:
         f.write((uint8_t*)s.c_str(), s.length());
         f.write('\n');
     }
-    string getFirstLine() { 
+    string getLine(int lineNumber) { 
         fs::File f = LittleFS.open(filename.c_str(), "r");
-        return getNextLine(f);
+        string line;
+        while(lineNumber-- >= 0) line = getNextLine(f);
+        return line;
     }
     vector<string> getFirstLines(int count) {
         fs::File f = LittleFS.open(filename.c_str(), "r");
@@ -319,7 +317,7 @@ public:
         fs::File f2 = LittleFS.open(filename.c_str(), "r+");
         while(true) { 
             wdtReset();
-            OUT("%d %d %d %d", pos, bytesToRemove, origSize, fileSz);
+            //OUT("%d %d %d %d", pos, bytesToRemove, origSize, fileSz);
             uint8_t buf[256];
             f.seek(pos + bytesToRemove);
             int n = f.read(buf, sizeof(buf));
@@ -394,15 +392,36 @@ static inline float round(float f, float prec) {
     return floor(f / prec + .5) * prec;
 }
 
-// TODO: avoid repeated connection attempts
 class SleepyLogger { 
+    bool initialized = false;
+    void checkInit() { 
+        if (initialized) return;
+        initialized = true;
+        if (getResetReason(0) != 5 && spiffsReportLog.size() > 0) { 
+            // stale logs of unknown time.  Find largest TSLP value and artificially set
+            // firstLogAgeMs to that far in the past.
+            string line;
+            int lineNr = 0;
+            uint32_t maxTslp = 0;
+            OUT("Found %d stale entries in log, reading...", spiffsReportLog.size());
+            while((line = spiffsReportLog.getLine(lineNr++)) != "") {
+
+                wdtReset();
+                JsonDocument doc;
+                DeserializationError error = deserializeJson(doc, line);
+                maxTslp = max(maxTslp, doc[TSLP].as<uint32_t>());
+            }
+            OUT("Found %d stale entries in log, setting TSLP to %d", spiffsReportLog.size(), maxTslp);
+            firstLogAgeMs.set(maxTslp);
+        }
+    }
 public:
     FileLineLogger spiffsReportLog;
     FailRetryInterval postFailTimer;
     // currently runs out of memory at about 100 at line 'vector<string> logs = spiffsReportLog' in post()
     // only succeeds after reboot when set to 90 
     static const int maxLogSize = 150; 
-    DeepSleepElapsedTimer postPeriodTimer = DeepSleepElapsedTimer("/SL.reportTimer");
+    DeepSleepElapsedTimer postPeriodTimer = DeepSleepElapsedTimer("/SL.reportTimer", true);
     DeepSleepElapsedTimer firstLogAgeMs = DeepSleepElapsedTimer("/SL.log0Age");
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
 
@@ -464,7 +483,6 @@ public:
             bool firstLine = true;
             vector<string> lines = spiffsReportLog.getFirstLines(batchSize);
             for(auto i : lines) { 
-            //for(i = 0; i < spiffsReportLog.read().size() && i < 10; i++) { 
                 fflush(stdout);
                 uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
                 JsonDocument doc;
@@ -472,7 +490,6 @@ public:
                 if (!error && doc[TSLP].as<int>() != 0) {
                     uint32_t fpa = firstLogAgeMs.elapsed();
                     doc["LTO"] = round((fpa - doc[TSLP].as<int>()) / 1000.0, .1);
-                    doc["FPA"] = fpa;
                     string s;
                     serializeJson(doc, s);
                     if (!firstLine) post += ",";
@@ -487,6 +504,7 @@ public:
             JsonDocument tmp;
             DeserializationError error = deserializeJson(tmp, post);
             JsonArray a = tmp["LOG"].as<JsonArray>();
+            // leave TLSP in for debugging use for now
             //for(JsonVariant v : a) v.remove(TSLP);
             serializeJson(tmp, post);
 
@@ -555,10 +573,11 @@ public:
         return rval;
     }
 
-    JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
-        OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %.1f", deepsleepMs.millis()/1000.0, 
-        forcePost, postPeriodTimer.elapsed()/1000.0, postFailTimer.getWaitMinutes());
+    JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false, bool inhibitPost = false) {
+        //OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %.1f", deepsleepMs.millis()/1000.0, 
+        //forcePost, postPeriodTimer.elapsed()/1000.0, postFailTimer.getWaitMinutes());
 
+        checkInit();
         if (spiffsReportLog.size() == 0)
             firstLogAgeMs.reset();
         JsonDocument result; 
@@ -575,15 +594,16 @@ public:
         spiffsReportLog.push_back(s);
         
         float waitMs = postFailTimer.getWaitMinutes() * 60 * 1000;
+        bool doPost = forcePost && !inhibitPost;
         if (postPeriodTimer.elapsed() > waitMs)
-            forcePost = true;
+            doPost = true;
         if (spiffsReportLog.size() == maxLogSize)
-            forcePost = true;
+            doPost = true; 
         if (LittleFS.usedBytes() > LittleFS.totalBytes() / 2 - 20 *1024)
-            forcePost = true;
+            doPost = true; // post if space is running low 
         if (postFailTimer.failCount() > 0 && postPeriodTimer.elapsed() < waitMs) 
-            forcePost = false;
-        if (forcePost) 
+            doPost = false; // if theres been a failure, we don't post for any reason other than timer
+        if (doPost) 
             result = post(adminDoc);
         
         return result;
@@ -856,7 +876,7 @@ void loop() {
 
     // Serial log 
     if (j.secTick(1) || j.once()) {
-        while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
+        //while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
         OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, "
             "exvpd %.2f vpd %.2f pwm %d pow %d fs used %d/%d",
@@ -867,7 +887,7 @@ void loop() {
             vpdInt, pwm, hal->digitalRead(pins.power),
             LittleFS.usedBytes(), LittleFS.totalBytes()
         );
-        }
+    }
 
     // Run PID loop and log data
     if (alreadyLogged == false && 
@@ -892,15 +912,16 @@ void loop() {
         doc["fanPwm"] = pwm;
         doc["pidI"] = round(config.pid.iSum, .001);
         readSensors(doc);
-        JsonDocument response = logger.log(doc, adminDoc, forcePost);
+        bool inhibitPost = sensorServer.getSleepRequest() < 20.0;
+        JsonDocument response = logger.log(doc, adminDoc, forcePost, inhibitPost);
 
         if (response["CONFIG"]) {
-            OUT("Got new config in post respose");
+            //OUT("Got new config in post respose");
             config.applyNewConfig(response["CONFIG"]);
             saveConfig();
         }
-        OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", 
-            deepsleepMs.millis()/1000.0, vpdInt, (int)logger.spiffsReportLog.size(), pwm);
+        //OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", 
+        //    deepsleepMs.millis()/1000.0, vpdInt, (int)logger.spiffsReportLog.size(), pwm);
 
         forcePost = false;
         alreadyLogged = true;     
@@ -920,15 +941,15 @@ void loop() {
     pwm = setFan(pwm);
     // should only sleep if sensorServer.getSleepRequest() is valid and > 0.  Then sleep
     // the minimum of the two sleep requests
-    int sensorLoopSleepMs = sensorServer.getSleepRequest() * 1000 - 5000;
+    int sensorLoopSleepMs = sensorServer.getSleepRequest() * 1000;
     int sampleLoopSleepMs = config.sampleTime * 60 * 1000 - (millis() - sampleStartTime);
     int sleepMs = min(sampleLoopSleepMs, sensorLoopSleepMs);
 
 
     // TODO: fix pwm light sleep issues, lightSleep() currently stubbed out with busy wait 
     if (sleepMs > 0) { 
-        OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleepMs.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
-        bool dsleep = (pwm ==0);
+        //OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleepMs.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
+        bool dsleep = (pwm == 0);
 #ifdef GPROF // avoid deepsleep to make one long continuous profiling run 
         dsleep = false;
 #endif
@@ -970,8 +991,8 @@ void saveConfig() {
 void deepSleep(int ms) { 
     OUT("%09.3f DEEP SLEEP for %.2f was awake %.2fs", deepsleepMs.millis() / 1000.0, ms/1000.0, millis()/1000.0);
     logger.prepareSleep(ms);
-    sensorServer.prepareSleep(ms);
     deepsleepMs.prepareSleep(ms);
+    sensorServer.prepareSleep(ms);
     esp_sleep_enable_timer_wakeup(1000LL * ms);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
@@ -1067,11 +1088,12 @@ public:
     }
     lastRun = millis(); 
   }  
-} wsim;
+};
 
 #ifdef CSIM
 class Csim : public ESP32sim_Module {
-    public:
+    WorldSim wsim;
+public:
     Csim() {
         ESPNOW_sendHandler = new ESPNOW_csimOneProg();
         csim_flags.OneProg = true;
@@ -1123,6 +1145,7 @@ class Csim : public ESP32sim_Module {
 #endif
 
 class HAL_esp32c3_HIL : public HAL {
+    WorldSim wsim;
     typedef HAL Parent; 
 public:
     float avgAnalogRead(int p) override {
@@ -1141,7 +1164,7 @@ public:
             uint8_t _pin, _type;
         };
         BackdoorDHT *dht = (BackdoorDHT *)d;
-        wsim.speedUp = 24.0;
+        wsim.speedUp = 24.0 * 60 / 10; // day every 10 minutes
         wsim.run(lsPwm.getDuty());
         if (dht->_pin == pins.dhtData3) {
             *t = wsim.intT;
