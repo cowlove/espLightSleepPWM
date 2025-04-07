@@ -80,22 +80,23 @@ public:
 
 
 class DeepSleepElapsedTimer { // use DeepSleepElapsedTimer
-    SPIFFSVariable<int64_t> bootOffsetMs;
-    bool resetAfterHardReset = false;
+    SPIFFSVariable<uint32_t> bootOffsetMs;
+    bool initialized = false;
 public:
     DeepSleepElapsedTimer(const char *fn) : bootOffsetMs(fn, 0) {}
     void prepareSleep(int ms) { 
         bootOffsetMs = bootOffsetMs + ::millis() + ms;
     }
     uint32_t millis() {
-        if (getResetReason(0) != 5 && resetAfterHardReset == false) { 
-            resetAfterHardReset = true;
-            bootOffsetMs = 0;
+        if (!initialized) { 
+            if (getResetReason(0) != 5)  
+                bootOffsetMs = 0;
+            initialized = true;
         }
         return (::millis()) + bootOffsetMs;
     }
     uint32_t elapsed() { return this->millis(); }
-    void reset() { bootOffsetMs = -((int64_t)::millis()); }
+    void reset() { bootOffsetMs = (uint32_t)0 - ::millis(); }
 };
 
 DeepSleepElapsedTimer deepsleep("/deepsleep");
