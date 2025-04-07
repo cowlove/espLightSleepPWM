@@ -853,6 +853,7 @@ void loop() {
     testLoop();
     return;
 #endif
+
     pwm = setFan(pwm); // power keeps getting turned on???
     sensorServer.synchPeriodMin = config.sensorTime;
 
@@ -990,12 +991,12 @@ void saveConfig() {
 
 void deepSleep(int ms) { 
     OUT("%09.3f DEEP SLEEP for %.2f was awake %.2fs", deepsleepMs.millis() / 1000.0, ms/1000.0, millis()/1000.0);
-    logger.prepareSleep(ms);
-    deepsleepMs.prepareSleep(ms);
-    sensorServer.prepareSleep(ms);
     esp_sleep_enable_timer_wakeup(1000LL * ms);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
+    deepsleepMs.prepareSleep(ms);
+    sensorServer.prepareSleep(ms);
+    logger.prepareSleep(ms);
     esp_deep_sleep_start();        
 }
 
