@@ -499,19 +499,22 @@ public:
             for(int retry = 0; retry < 5; retry ++) {
                 wdtReset();
                 // TODO looks like deepsleep millis() is too big 
-                uint64_t nowmsec = deepsleep.millis() + 5LL * 365 * 24 * 3600 * 1000000;
+                r = client.POST(post.c_str());
+                String resp =  client.getString();
+                deserializeJson(rval, resp.c_str());
+
+                // log the line to serial for data plotting tools 
+                uint64_t nowmsec = (uint64_t)deepsleep.millis() + 5ULL * 365ULL * 24ULL * 3600ULL * 1000000ULL;
                 time_t nt = nowmsec / 1000;
                 struct tm *ntm = localtime(&nt);
                 char buf[64];
                 // TODO things arent plotting correctly in test_csim
                 //2025-03-27T03:53:24.568Z
+                if (r != 200) Serial.printf("ERROR:"); // prefix to spoil the line for data plotting tools 
                 strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
                 Serial.printf("[%s.%03dZ] ", buf, (int)((nowmsec % 1000)));
- 
                 Serial.println(post.c_str());
-                r = client.POST(post.c_str());
-                String resp =  client.getString();
-                deserializeJson(rval, resp.c_str());
+
                 OUT("http.POST returned %d: %s", r, resp.c_str());
                 if (r == 200) 
                     break;
