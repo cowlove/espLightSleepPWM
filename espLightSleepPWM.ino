@@ -14,15 +14,17 @@
 //#define LittleFS SPIFFS
 #endif
 
+#ifndef OUT
+void out(const char *f, ...) {}
+#define OUT
+#endif
+
+JStuff j;
 // Idea
 class DeepSleepManager {
     
 };
 
-#ifndef OUT
-void out(const char *f, ...) {}
-#define OUT
-#endif
 
 namespace FailActions {
     typedef std::function<void()> FailCallback;
@@ -82,29 +84,6 @@ public:
     } 
 };
 
-
-class DeepSleepElapsedTimer { // use DeepSleepElapsedTimer
-    SPIFFSVariable<uint32_t> bootOffsetMs;
-    bool initialized = false;
-public:
-    DeepSleepElapsedTimer(const char *fn) : bootOffsetMs(fn, 0) {}
-    void prepareSleep(int ms) { 
-        bootOffsetMs = bootOffsetMs + ::millis() + ms;
-    }
-    uint32_t millis() {
-        if (!initialized) { 
-            if (getResetReason(0) != 5)  
-                bootOffsetMs = 0;
-            initialized = true;
-        }
-        return (::millis()) + bootOffsetMs;
-    }
-    uint32_t elapsed() { return this->millis(); }
-    void reset() { bootOffsetMs = (uint32_t)0 - ::millis(); }
-};
-
-DeepSleepElapsedTimer deepsleep("/deepsleep");
-
 string getServerName() { 
     if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
     if (WiFi.SSID() == "ClemmyNet") return "http://192.168.68.118:8080";
@@ -114,7 +93,6 @@ string getServerName() {
 using std::string;
 using std::vector;
 
-JStuff j;
 struct LightSleepPWM { 
     static const ledc_timer_t LEDC_LS_TIMER  = LEDC_TIMER_0;
     static const ledc_mode_t LEDC_LS_MODE = LEDC_LOW_SPEED_MODE;
@@ -239,6 +217,7 @@ HAL *hal = &halHW;
 void setHITL();
     
 SPIFFSVariable<string> configString("/configString3", "");
+DeepSleepElapsedTimer deepsleepMs("/deepsleep");
 
 class FileLineLogger { 
     string filename;
@@ -428,8 +407,8 @@ public:
     const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
 
     SleepyLogger(const string &prefix = "") : 
-        spiffsReportLog(prefix + "/reportLog"), 
-        postFailTimer(prefix + "/postFailTimer") {}
+        spiffsReportLog(string("/") + prefix + ".reportLog"), 
+        postFailTimer(string("/") + prefix + ".postFailTimer") {}
 
     void prepareSleep(int ms) {
         postPeriodTimer.prepareSleep(ms);
@@ -518,7 +497,7 @@ public:
                 deserializeJson(rval, resp.c_str());
 
                 // Print the log line to serial for data plotting tools 
-                uint64_t nowmsec = (uint64_t)deepsleep.millis() + 52ULL * 365ULL * 24ULL * 3600ULL * 1000ULL;
+                uint64_t nowmsec = (uint64_t)deepsleepMs.millis() + 52ULL * 365ULL * 24ULL * 3600ULL * 1000ULL;
                 time_t nt = nowmsec / 1000ULL;
                 struct tm *ntm = localtime(&nt);
                 char buf[64];
@@ -577,7 +556,7 @@ public:
     }
 
     JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false) {
-        OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %.1f", deepsleep.millis()/1000.0, 
+        OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %.1f", deepsleepMs.millis()/1000.0, 
         forcePost, postPeriodTimer.elapsed()/1000.0, postFailTimer.getWaitMinutes());
 
         if (spiffsReportLog.size() == 0)
@@ -855,8 +834,8 @@ void loop() {
     return;
 #endif
     pwm = setFan(pwm); // power keeps getting turned on???
-    sensorServer.serverSleepSeconds = config.sensorTime * 60;
-    sensorServer.serverSleepLinger = 12;
+    sensorServer.synchPeriodMin = config.sensorTime;
+
     int sensorWaitSec = min(10.0F, config.sampleTime * 60);
     logger.postFailTimer.defaultWaitMin = config.reportTime;
 
@@ -881,7 +860,7 @@ void loop() {
         vpdInt = getVpd(dht3);
         OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, "
             "exvpd %.2f vpd %.2f pwm %d pow %d fs used %d/%d",
-            deepsleep.millis() / 1000.0, (int)logger.spiffsReportLog.size(), 
+            deepsleepMs.millis() / 1000.0, (int)logger.spiffsReportLog.size(), 
             (int)logger.postPeriodTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             ESP.getMinFreeHeap(), calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
@@ -921,7 +900,7 @@ void loop() {
             saveConfig();
         }
         OUT("%09.3f Control loop ran, vpd %.2f log queue %d, fan power %d", 
-            deepsleep.millis()/1000.0, vpdInt, (int)logger.spiffsReportLog.size(), pwm);
+            deepsleepMs.millis()/1000.0, vpdInt, (int)logger.spiffsReportLog.size(), pwm);
 
         forcePost = false;
         alreadyLogged = true;     
@@ -948,7 +927,7 @@ void loop() {
 
     // TODO: fix pwm light sleep issues, lightSleep() currently stubbed out with busy wait 
     if (sleepMs > 0) { 
-        OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleep.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
+        OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleepMs.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
         bool dsleep = (pwm ==0);
 #ifdef GPROF // avoid deepsleep to make one long continuous profiling run 
         dsleep = false;
@@ -989,10 +968,10 @@ void saveConfig() {
 }
 
 void deepSleep(int ms) { 
-    OUT("%09.3f DEEP SLEEP for %.2f was awake %.2fs", deepsleep.millis() / 1000.0, ms/1000.0, millis()/1000.0);
+    OUT("%09.3f DEEP SLEEP for %.2f was awake %.2fs", deepsleepMs.millis() / 1000.0, ms/1000.0, millis()/1000.0);
     logger.prepareSleep(ms);
     sensorServer.prepareSleep(ms);
-    deepsleep.prepareSleep(ms);
+    deepsleepMs.prepareSleep(ms);
     esp_sleep_enable_timer_wakeup(1000LL * ms);
     fflush(stdout);
     uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
@@ -1000,7 +979,7 @@ void deepSleep(int ms) {
 }
 
 void lightSleep(int ms) { 
-    OUT("%09.3f LIGHT SLEEP for %.2fs was awake %.2fs", deepsleep.millis() / 1000.0, ms/1000.0, millis()/1000.0);
+    OUT("%09.3f LIGHT SLEEP for %.2fs was awake %.2fs", deepsleepMs.millis() / 1000.0, ms/1000.0, millis()/1000.0);
 
 #ifndef CSIM
     // TMP can't get light sleep PWM working on ESP32C3 
@@ -1076,7 +1055,7 @@ public:
         } else {
             bv1 = max(900.0L, bv1 - .000001L * speedUp);
         }
-        float day = deepsleep.millis() / 3600000.0 / 24 * speedUp;
+        float day = deepsleepMs.millis() / 3600000.0 / 24 * speedUp;
         intTA.add(max(2.0, cos(day * 2 * M_PI) * 30 - 4) + pwm * 0.3);
         intT = intTA.average();
         extTA.add(max(2.0, cos(day * 2 * M_PI) * 35 - 2));
