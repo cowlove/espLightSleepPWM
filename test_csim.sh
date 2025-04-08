@@ -4,7 +4,7 @@ OPT=$1; if [ "$OPT" == "" ]; then OPT="-brp"; fi
 set -e
 if [[ $OPT == *b* ]]; then 
 echo Compiling...; 
-time make csim; 
+time make -f Makefile.csim csim; 
 fi
 
 

@@ -10,7 +10,7 @@ SRC_WITHOUT_PATH = $(notdir $(SRCS))
 OBJS=$(SRC_WITHOUT_PATH:%.cpp=${BUILD_DIR}/%.o)
 INC=$(foreach DIR,$(SRC_DIRS),-I${DIR})
 
-CFLAGS=-pg -DGPROF=1 -O2 -fpermissive -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU 
+CFLAGS=-O2 -g -pg -DGPROF=1 -fpermissive -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU 
 
 ${BUILD_DIR}/%.o: %.cpp 
 	g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@

@@ -683,7 +683,8 @@ void setup() {
     if (getMacAddress() == "E4B323C55708") setHITL();
     if (getMacAddress() == "A0DD6C725F8C") setHITL();
     if (getMacAddress() == "08F9E0F6E0B0") setHITL();
-
+    if (getMacAddress() == "F0F5BD723D08") setHITL();
+    
     j.begin();
     dht1 = new DHT(pins.dhtData1, DHT22);
     dht2 = new DHT(pins.dhtData2, DHT22);
