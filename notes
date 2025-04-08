@@ -25,9 +25,11 @@ fgrep -n '().c_str()' *.ino
 
 grep 'DEEP' cat.out \
 | rematch '([0-9][0-9]):([0-9][0-9]):([0-9][0-9][.][0-9]+)Z. ([0-9.]+)' \
-| awk '{ x=$1*3600+$2*60+$3-$4; 
+| awk '
+{   x=$1*3600+$2*60+$3-$4; 
     print $1 " " $2 " " $3 " " $4 " " x " " last - x; 
-    if(NR>1) {sum=sum+last-x; count = count + 1;}
-    last=x;};
-    END{print count " samples, avg " sum/count "  total " sum;}'
+    if(NR>1) { sum=sum+last-x; count = count + 1; }
+    last=x;
+};
+END { print count " samples, avg " sum/count "  total " sum; }'
 

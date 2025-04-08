@@ -1,0 +1,34 @@
+GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always --tags)"
+MAIN_NAME=espLightSleepPWM
+BUILD_DIR=./build/csim
+
+LIBS=esp32jimlib Arduino_CRC32 ArduinoJson
+
+SRC_DIRS=$(foreach L,$(LIBS),${HOME}/Arduino/libraries/${L}/src)
+SRCS=$(foreach DIR,$(SRC_DIRS),$(wildcard $(DIR)/*.cpp)) 
+SRC_WITHOUT_PATH = $(notdir $(SRCS))
+OBJS=$(SRC_WITHOUT_PATH:%.cpp=${BUILD_DIR}/%.o)
+INC=$(foreach DIR,$(SRC_DIRS),-I${DIR})
+
+CFLAGS=-pg -DGPROF=1 -O2 -fpermissive -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU 
+
+${BUILD_DIR}/%.o: %.cpp 
+	g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@
+
+${BUILD_DIR}/%.o: %.ino 
+	g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@
+
+${MAIN_NAME}_csim: ${OBJS} ${BUILD_DIR}/${MAIN_NAME}.o 
+	g++ -g ${CSIM_CFLAGS} ${OBJS} ${BUILD_DIR}/${MAIN_NAME}.o -o $@         
+
+csim: ${MAIN_NAME}_csim
+	cp $< $@
+
+${BUILD_DIR}:
+	mkdir -p ${BUILD_DIR}
+
+VPATH = $(sort $(dir $(SRCS)))
+
+.PHONY: clean
+clean:
+	rm -f ${BUILD_DIR}/*.o ${MAIN_NAME}_csim csim

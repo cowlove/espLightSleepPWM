@@ -8,7 +8,6 @@
 #include "rom/uart.h"
 #include <HTTPClient.h>
 #include <esp_sleep.h>
-
 #include <LittleFS.h>
 //#include <SPIFFS.h>
 //#define LittleFS SPIFFS
@@ -610,7 +609,6 @@ public:
     }
 };
 
-
 class SimplePID { 
 public:
     float pgain = 1, igain = 1, dgain = 1, fgain = 10, maxI = 10;
@@ -803,45 +801,6 @@ int setFan(int pwm) {
     return pwm;
 }
 
-void testLoop() {
-    #if 0 
-    // trying to figure out light sleep gpio hold en
-    digitalWrite(GPIO_NUM_8, 1);
-    gpio_hold_en(GPIO_NUM_8);
-    delay(2000);
-    OUT("starting light sleep");
-
-    esp_sleep_enable_timer_wakeup(2000 * 1000L);
-    uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-    gpio_hold_en(GPIO_NUM_8);
-    //rtc_gpio_hold_en(GPIO_NUM_8);
-    gpio_deep_sleep_hold_en();
-    esp_light_sleep_start();
-    OUT("ending light sleep");
-    wdtReset();
-    return;
-#endif
-    static int pwm = 5; 
-    j.jw.enabled = j.mqtt.active = true;
-    j.run();
-    if (j.secTick(1)) { 
-        if(WiFi.status() != WL_CONNECTED) { 
-            //wifiConnect();
-        }
-        OUT("RSSI: %d", WiFi.RSSI());
-        setFan(pwm);
-        pwm += 5;
-        if (pwm > 20) pwm = 0;
-        if (1) {
-            JsonDocument d;
-            readSensors(d);
-            string s;
-            serializeJson(d, s);
-            OUT("%s", s.c_str());
-        }
-    }
-}
-
 // TODO: observed bug where too short of a sampleTime means it never gets to log or post
 // TODO: separate sensorServer sleep request and the sample loop, they are now the same
 // duration 
@@ -850,10 +809,15 @@ int testMode = 0;
 float vpdInt;
 void loop() {
 #if 0
-    testLoop();
+    for (int n = 0; n < 5; n++) { 
+        int x = hal->avgAnalogRead(pins.bv1);
+        int y = 0;//adc1_get_raw(ADC1_CHANNEL_1);
+        printf("analogRead(%d) %d %d\n", pins.bv1, x, y);
+        delay(100);
+    }
+    wdtReset();
     return;
 #endif
-
     pwm = setFan(pwm); // power keeps getting turned on???
     sensorServer.synchPeriodMin = config.sensorTime;
 
@@ -861,7 +825,7 @@ void loop() {
     logger.postFailTimer.defaultWaitMin = config.reportTime;
 
     float bv1 = hal->avgAnalogRead(pins.bv1);
-    if (bv1 > 1000 && bv1 < 2000) { 
+    if (false && bv1 > 1000 && bv1 < 2000) { 
         printf("Battery too low %.1f sleeping 1 hour\n", bv1);
         int sleepMs = 60 * 60 * 1000;
         deepSleep(sleepMs);
@@ -880,12 +844,12 @@ void loop() {
         //while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
         OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, "
-            "exvpd %.2f vpd %.2f pwm %d pow %d fs used %d/%d",
+            "exvpd %.2f vpd %.2f bv1 %.1f pwm %d pow %d fs used %d/%d",
             deepsleepMs.millis() / 1000.0, (int)logger.spiffsReportLog.size(), 
             (int)logger.postPeriodTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             ESP.getMinFreeHeap(), calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
-            vpdInt, pwm, hal->digitalRead(pins.power),
+            vpdInt, hal->avgAnalogRead(pins.bv1), hal->digitalRead(pins.power),
             LittleFS.usedBytes(), LittleFS.totalBytes()
         );
     }
@@ -947,6 +911,7 @@ void loop() {
     int sleepMs = min(sampleLoopSleepMs, sensorLoopSleepMs);
 
 
+    OUT("%09.3f bv1: %f", millis()/1000.0, hal->avgAnalogRead(pins.bv1));
     // TODO: fix pwm light sleep issues, lightSleep() currently stubbed out with busy wait 
     if (sleepMs > 0) { 
         //OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleepMs.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
@@ -1097,6 +1062,14 @@ class Csim : public ESP32sim_Module {
 public:
     Csim() {
         ESPNOW_sendHandler = new ESPNOW_csimOneProg();
+    }
+    RemoteSensorClient client1; 
+    string dummy;
+    void parseArg(char **&a, char **la) override {
+        if (strcmp(*a, "--dummy") == 0)
+                dummy = *(++a);
+    }
+    void setup() override {
         csim_flags.OneProg = true;
         HTTPClient::csim_onPOST("http://.*/log", 
             [](const char *url, const char *hdr, const char *data, string &result) {
@@ -1113,14 +1086,6 @@ public:
                 serializeJson(doc, result);
                 return 200;
             });
-    }
-    RemoteSensorClient client1; 
-    string dummy;
-    void parseArg(char **&a, char **la) override {
-        if (strcmp(*a, "--dummy") == 0)
-                dummy = *(++a);
-    }
-    void setup() override {
         client1.csimOverrideMac("EC64C9986F2C");
         onDeepSleep([this](uint64_t usec) {
             client1.setPartialDeepSleep(usec);
@@ -1133,10 +1098,10 @@ public:
         wsim.run(pwm);
         
         if (dht3) 
-            csim_dht.csim_set(dht3->pin, wsim.intT, wsim.intH);
+            DHT::csim.set(dht3->pin, wsim.intT, wsim.intH);
         SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
         if (sensor) 
-            csim_dht.csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
+            DHT::csim.set(sensor->dht.pin, wsim.extT, wsim.extH);
         
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);

@@ -15,26 +15,9 @@ BUILD_EXTRA_FLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
 
 include ${HOME}/Arduino/libraries/makeEspArduino/makeEspArduino.mk
 
-.PHONY: ${MAIN_NAME}_csim
-
-csim: ${MAIN_NAME}_csim
-	cp $< $@
-
-CSIM_INC=-I${HOME}/Arduino/libraries/ArduinoJson/src/ -I${HOME}/Arduino/libraries/Arduino_CRC32/src/ \
-	-I${HOME}/Arduino/libraries/esp32jimlib/src/ 
-
-CSIM_CPP=${HOME}/Arduino/libraries/Arduino_CRC32/src/* 	
-
-CSIM_CFLAGS=-pg -DGPROF=1
-CSIM_OFLAGS=-O2
-${MAIN_NAME}_csim:  
-	g++ -g ${CSIM_OFLAGS} -x c++ ${CSIM_CFLAGS} -fpermissive ${MAIN_NAME}.ino -o $@ -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU \
-	-I./   ${CSIM_INC}  \
-	${CSIM_CPP}
-        
-
-csim:   ${MAIN_NAME}_csim
-
+.PHONY: csim
+csim: 
+	make -f Makefile.csim csim 
 
 fixtty:
 	stty -F ${UPLOAD_PORT} -hupcl -crtscts -echo raw 115200
