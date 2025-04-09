@@ -1,6 +1,7 @@
 GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always --tags)"
 MAIN_NAME=$(shell basename `pwd`)
 BUILD_DIR=./build/csim
+MAKEFLAGS:=-j4 -s
 
 LIBS=esp32jimlib Arduino_CRC32 ArduinoJson
 
@@ -39,3 +40,4 @@ clean:
 	rm -f ${BUILD_DIR}/*.[od] ${MAIN_NAME}_csim csim
 
 -include ${BUILD_DIR}/*.d
+
