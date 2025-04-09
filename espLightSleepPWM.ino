@@ -15,7 +15,6 @@
 #include "serialLog.h"
 #include "RollingLeastSquares.h"
 
-
 JStuff j;
 	
 string getServerName() { 
