@@ -15,12 +15,15 @@ CFLAGS=${OPT} -g -MMD -fpermissive -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCS
 #CFLAGS+=-O2
 
 ${BUILD_DIR}/%.o: %.cpp 
+	echo $@
 	g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@
 
-${BUILD_DIR}/%.o: %.ino 
+${BUILD_DIR}/%.o: %.ino
+	echo $@
 	g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@
 
-${MAIN_NAME}_csim: ${OBJS} ${BUILD_DIR}/${MAIN_NAME}.o 
+${MAIN_NAME}_csim: ${OBJS} ${BUILD_DIR}/${MAIN_NAME}.o
+	echo $@
 	g++ -g ${CSIM_CFLAGS} ${OBJS} ${BUILD_DIR}/${MAIN_NAME}.o -o $@         
 
 csim: ${MAIN_NAME}_csim ${BUILD_DIR}

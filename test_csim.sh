@@ -4,14 +4,14 @@ OPT=$1; if [ "$OPT" == "" ]; then OPT="-brp"; fi
 set -e
 if [[ $OPT == *b* ]]; then 
 echo Compiling...; 
-time make -f Makefile.csim csim; 
+time make csim; 
 fi
 
 
 if [[ $OPT == *r* ]]; then
 echo Running... 
 rm -rf ./spiff/ && \
-time ./csim --seconds 200000 > ./out/csim.out 
+time ./csim --seconds 100000 > ./out/csim.out 
 fi
 
 if [[ $OPT == *p* ]]; then 

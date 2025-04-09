@@ -18,10 +18,6 @@
 
 JStuff j;
 	
-#undef OUT
-#define OUT serialLog.out 
-
-
 string getServerName() { 
     if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
     if (WiFi.SSID() == "ClemmyNet") return "http://192.168.68.118:8080";
@@ -158,19 +154,14 @@ void setHITL();
 SPIFFSVariable<string> configString("/configString3", "");
 DeepSleepElapsedTimer realtimeMs("/deepsleep");
 
-bool wifiConnect();
-void wifiDisconnect();
+//bool wifiConnect();
+//void wifiDisconnect();
 void readConfig(); 
 void saveConfig(); 
 void printConfig(); 
 void lightSleep(int); 
 float calcVpd(float t, float h);
 string floatRemoveTrailingZeros(string &);
-
-static inline float round(float f, float prec) {
-    return floor(f / prec + .5) * prec;
-}
-
 
 class SimplePID { 
 public:
@@ -510,7 +501,7 @@ void printConfig() {
     string s;
     d2["CONFIG"] = config;
     serializeJson(d2, s);
-    Serial.println(s.c_str());
+    OUT("%s\n", s.c_str());
 }
 
 void saveConfig() { 
