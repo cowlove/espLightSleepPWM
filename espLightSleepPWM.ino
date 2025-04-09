@@ -21,7 +21,7 @@ JStuff j;
 string getServerName() { 
     if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
     if (WiFi.SSID() == "ClemmyNet") return "http://192.168.68.118:8080";
-    if (WiFi.SSID() == "Station 54") return "http://192.168.68.71:8080";
+    if (WiFi.SSID() == "Station 54") return "http://192.168.68.73:8080";
     return "http://vheavy.com";
 }
 using std::string;
@@ -240,6 +240,8 @@ void setup() {
     if (getMacAddress() == "08F9E0F6E0B0") setHITL();
     if (getMacAddress() == "F0F5BD723D08") setHITL();
     if (getMacAddress() == "CCBA9716E0D8") setHITL();
+    if (getMacAddress() == "D48AFCA4D0BC") setHITL();
+
     
     j.begin();
     dht1 = new DHT(pins.dhtData1, DHT22);
