@@ -38,10 +38,13 @@ LINK_CMD1=`egrep " cr ${SKETCHDIR}/sketch/objs.a" $TMP`
 LINK_CMD2=`egrep "[-]o ${SKETCHDIR}/${SKETCH}.ino.elf" $TMP`
 LINK_CMD3=`grep esptool_py $TMP | grep -v ${PORT} | head -1 | tr '\n' ' '`
 LINK_CMD4=`grep esptool_py $TMP | grep -v ${PORT} | tail -1 | tr '\n' ' '`
-UPLOAD_CMD=`grep esptool_py $TMP | grep ${PORT} | tr '\n' ' '`
+UPLOAD_CMD=`grep esptool_py $TMP | grep ${PORT} | tr '\n' ' '| sed s\|${PORT}\|\\\${PORT}\|g`
 
 cat <<END > $OUT
 #!/bin/bash 
+PORT=\${PORT:=\$P}
+PORT=\${PORT:=$PORT}
+
 OPT=\$1; if [ "\$OPT" == "" ]; then OPT="-clwum"; fi
 set -e
 if [[ \$OPT == *c* ]]; then
@@ -62,18 +65,18 @@ fi
 
 if [[ \$OPT == *u* ]]; then
 	echo Uploading... 
-	if [[ \$OPT == *w* ]]; then echo -n Waiting for ${PORT}...; while [ ! -e ${PORT} ]; do sleep .01; done; echo OK; fi;
+	if [[ \$OPT == *w* ]]; then echo -n Waiting for \${PORT}...; while [ ! -e \${PORT} ]; do sleep .01; done; echo OK; fi;
 	$UPLOAD_CMD 
 fi
 
 if [[ \$OPT == *m* ]]; then
 	echo Monitoring...
-	if [[ \$OPT == *w* ]]; then echo -n Waiting for ${PORT}...; while [ ! -e ${PORT} ]; do sleep .01; done; echo OK; fi;
-	while sleep .01; do if [ -e ${PORT} ]; then stty -F ${PORT} 115200 raw -echo && cat ${PORT}; fi; done
+	if [[ \$OPT == *w* ]]; then echo -n Waiting for \${PORT}...; while [ ! -e \${PORT} ]; do sleep .01; done; echo OK; fi;
+	while sleep .01; do if [ -e \${PORT} ]; then stty -F \${PORT} 115200 raw -echo && cat \${PORT}; fi; done
 fi;
 
 
 END
 
 chmod 755 $OUT
-rm -f $TMP
+#rm -f $TMP

@@ -2,6 +2,7 @@ BOARD=esp32
 #VERBOSE=1::
 CHIP=esp32
 OTA_ADDR=192.168.68.118
+IGNORE_STATE=1
 
 ifeq ($(BOARD),esp32s3)
 	CDC_ON_BOOT = 1
@@ -17,7 +18,7 @@ include ${HOME}/Arduino/libraries/makeEspArduino/makeEspArduino.mk
 
 .PHONY: csim
 csim: 
-	make -f Makefile.csim csim 
+	make -f Makefile.csim csim
 
 fixtty:
 	stty -F ${UPLOAD_PORT} -hupcl -crtscts -echo raw 115200

@@ -1,8 +1,3 @@
-#include "jimlib.h"
-#include "sensorNetworkEspNOW.h"
-
-#include <ArduinoJson.h>
-
 #ifndef CSIM
 #include "driver/ledc.h"
 #include "rom/uart.h"
@@ -12,72 +7,20 @@
 //#include <SPIFFS.h>
 //#define LittleFS SPIFFS
 #endif
+//#include <ArduinoJson.h>
+
+#include "jimlib.h"
+#include "batchWebLogger.h"
+#include "sensorNetworkEspNOW.h"
+#include "serialLog.h"
+#include "RollingLeastSquares.h"
+
 
 JStuff j;
+	
+#undef OUT
+#define OUT serialLog.out 
 
-// Idea
-class DeepSleepManager {
-    
-};
-
-
-namespace FailActions {
-    typedef std::function<void()> FailCallback;
-    class FailAction { public: FailCallback func = [](){}; float waitMin = -1, increase = -1, multiply = -1; bool reboot = false, halt = false; };
-    struct WaitMin : public FailAction { WaitMin(float minutes) { waitMin = minutes; }};
-    struct IncreaseWait : public FailAction { IncreaseWait(float in) { increase = in; }};
-    struct MultiplyWait : public FailAction { MultiplyWait(float mu) { multiply = mu; }};
-    struct HardReboot : public FailAction { HardReboot() { reboot = true; }};
-    struct Halt : public FailAction { Halt() { halt = true; }};
-    struct Callback : public FailAction { Callback(FailCallback f) { func = f; }};
-};
-
-class FailRetryInterval {
-    string prefix;
-    SPIFFSVariable<int> spiffsConsecutiveFails;
-    typedef vector<pair<int, FailActions::FailAction>> FailActionList;
-    FailActionList failStrategy;
-public:
-    int failCount() { return spiffsConsecutiveFails; }
-    void reset() { spiffsConsecutiveFails = 0; }
-    float defaultWaitMin;
-    void setFailStrategy(FailActionList l) { failStrategy = l; };
-    FailRetryInterval(const string &prefix = "", float _defaultWaitMin = 1) : 
-        defaultWaitMin(_defaultWaitMin), spiffsConsecutiveFails(string("/") + prefix + "FRI.fails", 0) {}
-    void reportStatus(bool success) { 
-        spiffsConsecutiveFails = success ? 0 : spiffsConsecutiveFails + 1;
-    }
-    float getWaitMinutes(float defaultMin = -1) {
-        if (defaultMin >= 0) 
-            defaultWaitMin = defaultMin;
-        float waitMin = defaultWaitMin;
-
-        for(auto i : failStrategy) {
-            FailActions::FailAction action = i.second;
-            if (spiffsConsecutiveFails < i.first)
-                continue;
-            if (spiffsConsecutiveFails == i.first) { 
-                if (action.reboot) ESP.restart();
-                if (action.halt) { /*TODO*/}
-                action.func();
-            }
-            // TODO BROKEN: these actions incorrectly apply to ALL later fail counts,
-            // should only apply to the failures between *i and the next rule
-            if (spiffsConsecutiveFails >= i.first ) { 
-                if (action.waitMin != -1) waitMin = action.waitMin;
-                if (action.increase != -1) {
-
-                    waitMin *= action.increase * (spiffsConsecutiveFails - i.first + 1);
-                }
-                if (action.multiply != -1) {
-                    for(int n = 0; n < spiffsConsecutiveFails.read() - i.first + 1; n++) 
-                        waitMin *= action.multiply;
-                }
-            }
-        } 
-        return waitMin; 
-    } 
-};
 
 string getServerName() { 
     if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
@@ -175,6 +118,7 @@ struct {
 
 
 void yieldMs(int);
+
 class HAL {
 public:
     LightSleepPWM lsPwm;
@@ -212,178 +156,14 @@ HAL *hal = &halHW;
 void setHITL();
     
 SPIFFSVariable<string> configString("/configString3", "");
-DeepSleepElapsedTimer deepsleepMs("/deepsleep");
-
-class FileLineLogger { 
-    string filename;
-    int lineCount = -1;
-    string getNextLine(fs::File &f) { 
-        string line;
-        while(true) { 
-            uint8_t c;
-            int n = f.read(&c, 1);
-            if (n != 1 || c == '\n') break;
-            if (c != '\0') line += c;
-        }
-        return line;
-    }
-public:
-    FileLineLogger(const string &fn) : filename(fn) {}
-    void push_back(const string &s) { 
-        lineCount = getLines() + 1;
-        fs::File f = LittleFS.open(filename.c_str(), "a");
-        f.write((uint8_t*)s.c_str(), s.length());
-        f.write('\n');
-    }
-    string getLine(int lineNumber) { 
-        fs::File f = LittleFS.open(filename.c_str(), "r");
-        string line;
-        while(lineNumber-- >= 0) line = getNextLine(f);
-        return line;
-    }
-    vector<string> getFirstLines(int count) {
-        fs::File f = LittleFS.open(filename.c_str(), "r");
-        vector<string> rval; 
-        while(count-- > 0) { 
-            string l = getNextLine(f);
-            if(l == "") break;
-            rval.push_back(l);
-        }
-        return rval;
-    }
-    void trimLinesFromFrontCopy(int count) { 
-        lineCount = getLines();
-        if (count == 0) {
-            lineCount = 0;
-            return;
-        }
-        vector<string> toRemove = getFirstLines(count);
-        if (toRemove.size() == 0) {
-            lineCount = 0;
-            LittleFS.remove(filename.c_str());
-            return;
-        }
-        int bytesToRemove = 0;
-        for(auto l : toRemove) {
-            bytesToRemove += l.length() + 1;
-            lineCount--;
-        }
-
-        string tempfile = filename + ".T";
-        fs::File f1 = LittleFS.open(filename.c_str(), "r");
-        fs::File f2 = LittleFS.open(tempfile.c_str(), "w");
-        f1.seek(bytesToRemove);
-        while(true) {
-            uint8_t buf[64];
-            int n = f1.read(buf, sizeof(buf));
-            if (n <= 0) break;
-            f2.write(buf, n);
-        }
-        f1.close();
-        f2.close();
-        LittleFS.remove(filename.c_str());
-        LittleFS.rename(tempfile.c_str(), filename.c_str());
-    }
- 
-    // works in simulation, screws up on hardware 
-    void trimLinesFromFront_ZeroPad(int count) { 
-        LP();
-        lineCount = getLines();
-        if (count == 0) {
-            LittleFS.remove(filename.c_str());
-            return;
-        }
-        LP();
-        fs::File f = LittleFS.open(filename.c_str(), "r+");
-        int origSize = getTotalBytes();
-        vector<string> toRemove = getFirstLines(count);
-        int bytesToRemove = 0;
-        for(auto l : toRemove) {
-            bytesToRemove += l.length() + 1;
-            lineCount--;
-        }
-        LP();
-        if (bytesToRemove == origSize) { 
-            lineCount = 0;
-            f.close();
-            LittleFS.remove(filename.c_str());
-            return;
-        }
-        LP();
-        int pos = 0;
-        int fileSz = f.size();
-        
-        fs::File f2 = LittleFS.open(filename.c_str(), "r+");
-        while(true) { 
-            wdtReset();
-            //OUT("%d %d %d %d", pos, bytesToRemove, origSize, fileSz);
-            uint8_t buf[256];
-            f.seek(pos + bytesToRemove);
-            int n = f.read(buf, sizeof(buf));
-            OUT("read() returned %d", n);
-            if (n <= 0) break;
-            f2.seek(pos);
-            f2.write(buf, n);
-            pos += n;
-        }
-        f2.close();
-        LP();
-
-        // can't truncate, just pad the end with zeros
-        // f.truncate(origSize - bytesToRemove);
-        {    
-            f.seek(origSize - bytesToRemove);  
-            pos = origSize - bytesToRemove;; 
-            int fileSz = f.size();
-            OUT("file size %d", fileSz);
-            while(pos < fileSz) { 
-                uint8_t c = '\0';
-                f.write(&c, 1);
-                pos++;
-            }
-        }
-        LP();
-    }
-
-    void trimLinesFromFront(int count) { trimLinesFromFrontCopy(count); }
-    //void trimLinesFromFront(int count) { trimLinesFromFront_ZeroPad(count); }
-
-
-    int size() { return getLines(); } 
-    int getTotalBytes() {
-        fs::File f = LittleFS.open(filename.c_str(), "r");
-        int count = 0;
-        while(true) { 
-            char c;
-            int n = f.read((uint8_t *)&c, 1);
-            if (n != 1) break;
-            if (c != '\0') count++;
-        }
-        return count;
-    }
-    int getLines() {
-        if (lineCount < 0) { 
-            fs::File f = LittleFS.open(filename.c_str(), "r");
-            lineCount = 0;
-            while(true) { 
-                char c;
-                int n = f.read((uint8_t *)&c, 1);
-                if (n != 1) break;
-                if (c == '\n') lineCount++;
-            }
-        }
-        return lineCount;
-    }
-};
-
+DeepSleepElapsedTimer realtimeMs("/deepsleep");
 
 bool wifiConnect();
 void wifiDisconnect();
 void readConfig(); 
 void saveConfig(); 
 void printConfig(); 
-void deepSleep(int ms);
-void lightSleep(int ms);
+void lightSleep(int); 
 float calcVpd(float t, float h);
 string floatRemoveTrailingZeros(string &);
 
@@ -391,223 +171,6 @@ static inline float round(float f, float prec) {
     return floor(f / prec + .5) * prec;
 }
 
-class SleepyLogger { 
-    bool initialized = false;
-    void checkInit() { 
-        if (initialized) return;
-        initialized = true;
-        if (getResetReason(0) != 5 && spiffsReportLog.size() > 0) { 
-            // stale logs of unknown time.  Find largest TSLP value and artificially set
-            // firstLogAgeMs to that far in the past.
-            string line;
-            int lineNr = 0;
-            uint32_t maxTslp = 0;
-            OUT("Found %d stale entries in log, reading...", spiffsReportLog.size());
-            while((line = spiffsReportLog.getLine(lineNr++)) != "") {
-
-                wdtReset();
-                JsonDocument doc;
-                DeserializationError error = deserializeJson(doc, line);
-                maxTslp = max(maxTslp, doc[TSLP].as<uint32_t>());
-            }
-            OUT("Found %d stale entries in log, setting TSLP to %d", spiffsReportLog.size(), maxTslp);
-            firstLogAgeMs.set(maxTslp);
-        }
-    }
-public:
-    FileLineLogger spiffsReportLog;
-    FailRetryInterval postFailTimer;
-    // currently runs out of memory at about 100 at line 'vector<string> logs = spiffsReportLog' in post()
-    // only succeeds after reboot when set to 90 
-    static const int maxLogSize = 150; 
-    DeepSleepElapsedTimer postPeriodTimer = DeepSleepElapsedTimer("/SL.reportTimer", true);
-    DeepSleepElapsedTimer firstLogAgeMs = DeepSleepElapsedTimer("/SL.log0Age");
-    const char *TSLP = "TSLP"; // "Time Since Last Post" key/value to crease LTO "Log Time Offset" value in posted data 
-
-    SleepyLogger(const string &prefix = "") : 
-        spiffsReportLog(string("/") + prefix + ".reportLog"), 
-        postFailTimer(string("/") + prefix + ".postFailTimer") {}
-
-    void prepareSleep(int ms) {
-        postPeriodTimer.prepareSleep(ms);
-        firstLogAgeMs.prepareSleep(ms);
-    }
-    JsonDocument post(JsonDocument adminDoc) {
-        JsonDocument rval; 
-        if (!wifiConnect()) {
-            // broken you can't reset the report timer with TSLP values still in the log
-            // TODO: add seperate postPeriodMin for timing reports and firstLogTs 
-            // for measuring the age of reports.  firstLogTs is only reset when the log is empty
-            // and the first post is made   
-            // If stale logs are found after a hard boot, firstLogTs can be artificially set to be in
-            // the past by the amount of the largest TSLP value found in the stale long
-            // 
-            // maybe firstLogAgeMin would be clearer
-            OUT("SleepyLogger connection failed");
-            postFailTimer.reportStatus(false);
-            return rval;
-        }
-        
-        String ssid = WiFi.SSID();
-        String ip = WiFi.localIP().toString();
-        String mac = getMacAddress();
-        adminDoc["GIT"] = GIT_VERSION;
-        adminDoc["MAC"] = mac.c_str(); 
-        adminDoc["SSID"] = ssid.c_str();
-        adminDoc["IP"] =  ip.c_str();
-        adminDoc["RSSI"] = WiFi.RSSI();
-        adminDoc["ARCH"] = ARDUINO_VARIANT;
-        //adminDoc["AVER"] = ESP_ARDUINO_VERSION_STR;
-
-        HTTPClient client;
-        const string url = getServerName() + "/log";
-        int r = client.begin(url.c_str());
-        client.addHeader("Content-Type", "application/json");
-        fflush(stdout);
-        uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-
-
-        bool fail = false;
-        const int batchSize = 10;
-        while(spiffsReportLog.size() > 0) {
-            fflush(stdout);
-            uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-            string post;
-            {   // add scope to free up admin string when we're done with it
-                string admin;
-                serializeJson(adminDoc, admin);
-                post = "{\"ADMIN\":" + admin + ",\"LOG\":[";
-            }
-            int i = 0;
-            bool firstLine = true;
-            vector<string> lines = spiffsReportLog.getFirstLines(batchSize);
-            for(auto i : lines) { 
-                fflush(stdout);
-                uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-                JsonDocument doc;
-                DeserializationError error = deserializeJson(doc, i);
-                if (!error && doc[TSLP].as<int>() != 0) {
-                    uint32_t fpa = firstLogAgeMs.elapsed();
-                    doc["LTO"] = round((fpa - doc[TSLP].as<int>()) / 1000.0, .1);
-                    string s;
-                    serializeJson(doc, s);
-                    if (!firstLine) post += ",";
-                    firstLine = false;
-                    post += s;
-                } 
-            }
-            post += "]}";
-            post = floatRemoveTrailingZeros(post);
-
-            // reserialize the digest and remove TSLP values 
-            JsonDocument tmp;
-            DeserializationError error = deserializeJson(tmp, post);
-            JsonArray a = tmp["LOG"].as<JsonArray>();
-            // leave TLSP in for debugging use for now
-            //for(JsonVariant v : a) v.remove(TSLP);
-            serializeJson(tmp, post);
-
-            for(int retry = 0; retry < 5; retry ++) {
-                wdtReset();
-                r = client.POST(post.c_str());
-                String resp =  client.getString();
-                deserializeJson(rval, resp.c_str());
-
-                // Print the log line to serial for data plotting tools 
-                uint64_t nowmsec = (uint64_t)deepsleepMs.millis() + 52ULL * 365ULL * 24ULL * 3600ULL * 1000ULL;
-                time_t nt = nowmsec / 1000ULL;
-                struct tm *ntm = localtime(&nt);
-                char buf[64];
-                //2025-03-27T03:53:24.568Z
-                if (r != 200) Serial.printf("ERROR:"); // prefix to spoil the line for data plotting tools 
-                strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", ntm);
-                Serial.printf("[%s.%03dZ] ", buf, (int)((nowmsec % 1000)));
-                Serial.println(post.c_str());
-                OUT("http.POST returned %d: %s", r, resp.c_str());
-                if (r == 200) 
-                    break;
-                client.end();
-                wifiDisconnect();
-                delay(1000);
-                wifiConnect();
-                client.begin(url.c_str());
-                client.addHeader("Content-Type", "application/json");
-            }
-            if (r != 200) {  
-                fail = true;
-                break;
-            }
-
-            // runs out of memory here
-            //vector<string> logs = spiffsReportLog;
-            //logs.erase(logs.begin(), logs.begin() + i);
-            //spiffsReportLog = logs;
-            spiffsReportLog.trimLinesFromFront(batchSize);
-        }
-        client.end();
-
-        if (fail == true) { 
-            OUT("SleepyLogger repeat posts failed");
-            postFailTimer.reportStatus(false);
-            return rval;
-        }
-        postFailTimer.reportStatus(true);
-        postPeriodTimer.reset();
-
-        const char *ota_ver = rval["ota_ver"];
-        if (ota_ver != NULL) { 
-            if (strcmp(ota_ver, GIT_VERSION) == 0 || strlen(ota_ver) == 0
-                // dont update an existing -dirty unless ota_ver is also -dirty  
-                //|| (strstr(GIT_VERSION, "-dirty") != NULL && strstr(ota_ver, "-dirty") == NULL)
-                ) {
-                OUT("OTA version '%s', local version '%s', no upgrade needed", ota_ver, GIT_VERSION);
-            } else { 
-                OUT("OTA version '%s', local version '%s', upgrading...", ota_ver, GIT_VERSION);
-                string url = getServerName() + "/ota";
-                webUpgrade(url.c_str());
-            }       
-        }
-
-        wifiDisconnect();
-        return rval;
-    }
-
-    JsonDocument log(JsonDocument doc, JsonDocument adminDoc, bool forcePost = false, bool inhibitPost = false) {
-        //OUT("%09.3f log() forcePost %d, reportTimer %.1f postPeriodMinutes %.1f", deepsleepMs.millis()/1000.0, 
-        //forcePost, postPeriodTimer.elapsed()/1000.0, postFailTimer.getWaitMinutes());
-
-        checkInit();
-        if (spiffsReportLog.size() == 0)
-            firstLogAgeMs.reset();
-        JsonDocument result; 
-        doc[TSLP] = firstLogAgeMs.elapsed();
-        string s;
-        serializeJson(doc, s);    
-        //vector<string> logs = spiffsReportLog;
-        //logs.push_back(s);
-        //while(logs.size() > maxLogSize)
-        //    logs.erase(logs.begin());
-        //spiffsReportLog = logs;
-        if (spiffsReportLog.size() > maxLogSize - 1)
-            spiffsReportLog.trimLinesFromFront(spiffsReportLog.size() - (maxLogSize - 1));
-        spiffsReportLog.push_back(s);
-        
-        float waitMs = postFailTimer.getWaitMinutes() * 60 * 1000;
-        bool doPost = forcePost && !inhibitPost;
-        if (postPeriodTimer.elapsed() > waitMs)
-            doPost = true;
-        if (spiffsReportLog.size() == maxLogSize)
-            doPost = true; 
-        if (LittleFS.usedBytes() > LittleFS.totalBytes() / 2 - 20 *1024)
-            doPost = true; // post if space is running low 
-        if (postFailTimer.failCount() > 0 && postPeriodTimer.elapsed() < waitMs) 
-            doPost = false; // if theres been a failure, we don't post for any reason other than timer
-        if (doPost) 
-            result = post(adminDoc);
-        
-        return result;
-    }
-};
 
 class SimplePID { 
 public:
@@ -671,9 +234,10 @@ struct Config {
     }
 } config;
 
-SleepyLogger logger;
+BatchWebLogger logger;
 DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
+
 void setup() {
     hal->pinMode(pins.dhtGnd, OUTPUT);
     hal->digitalWrite(pins.dhtGnd, 0);
@@ -684,6 +248,7 @@ void setup() {
     if (getMacAddress() == "A0DD6C725F8C") setHITL();
     if (getMacAddress() == "08F9E0F6E0B0") setHITL();
     if (getMacAddress() == "F0F5BD723D08") setHITL();
+    if (getMacAddress() == "CCBA9716E0D8") setHITL();
     
     j.begin();
     dht1 = new DHT(pins.dhtData1, DHT22);
@@ -708,6 +273,7 @@ void setup() {
         {22, HardReboot()},
        // {10, Halt()},
     });
+    logger.getServerName = getServerName;
 
     readConfig();
     printConfig();
@@ -721,9 +287,9 @@ void setup() {
 class RemoteSensorModuleDHT : public RemoteSensorModule {
 public:
     RemoteSensorModuleDHT(const char *mac) : RemoteSensorModule(mac) {}
-    SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
+    //SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
     SensorDHT temp = SensorDHT(this, "TEMP", 26);
-    SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
+    //SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
     SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
     SensorOutput led = SensorOutput(this, "LED", 22, 0);
     SensorMillis m = SensorMillis(this);
@@ -844,14 +410,14 @@ void loop() {
     if (j.secTick(1) || j.once()) {
         //while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
-        OUT("%09.3f Q %2d, lastpost %4.1f, snsrs seen %3d, last sns rx %3.0f, ssr %3.0f min heap %d, "
-            "exvpd %.2f vpd %.2f bv1 %.1f pwm %d pow %d fs used %d/%d",
-            deepsleepMs.millis() / 1000.0, (int)logger.spiffsReportLog.size(), 
+        OUT("Q %2d lastl %4.0f sseen %d lasts %.0f ssr %.0f  "
+            "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d",
+            (int)logger.spiffsReportLog.size(), 
             (int)logger.postPeriodTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
-            ESP.getMinFreeHeap(), calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
-            vpdInt, hal->avgAnalogRead(pins.bv1), hal->digitalRead(pins.power),
-            LittleFS.usedBytes(), LittleFS.totalBytes()
+            calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
+            vpdInt, hal->avgAnalogRead(pins.bv1), pwm, hal->digitalRead(pins.power),
+            LittleFS.usedBytes()
         );
     }
 
@@ -912,7 +478,7 @@ void loop() {
     int sleepMs = min(sampleLoopSleepMs, sensorLoopSleepMs);
 
 
-    OUT("%09.3f bv1: %f", millis()/1000.0, hal->avgAnalogRead(pins.bv1));
+    //OUT("bv1: %f", hal->avgAnalogRead(pins.bv1));
     // TODO: fix pwm light sleep issues, lightSleep() currently stubbed out with busy wait 
     if (sleepMs > 0) { 
         //OUT("%09.3f sensorLoop %dms, serverLoop %dms", deepsleepMs.millis()/1000.0, sampleLoopSleepMs, sensorLoopSleepMs);
@@ -955,20 +521,8 @@ void saveConfig() {
     configString = s;
 }
 
-void deepSleep(int ms) { 
-    OUT("%09.3f DEEP SLEEP for %.2f was awake %.2fs", deepsleepMs.millis() / 1000.0, ms/1000.0, millis()/1000.0);
-    esp_sleep_enable_timer_wakeup(1000LL * ms);
-    fflush(stdout);
-    uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
-    deepsleepMs.prepareSleep(ms);
-    sensorServer.prepareSleep(ms);
-    logger.prepareSleep(ms);
-    esp_deep_sleep_start();        
-}
-
 void lightSleep(int ms) { 
-    OUT("%09.3f LIGHT SLEEP for %.2fs was awake %.2fs", deepsleepMs.millis() / 1000.0, ms/1000.0, millis()/1000.0);
-
+    OUT("LIGHT SLEEP for %.2fs was awake %.2fs", ms/1000.0, millis()/1000.0);
 #ifndef CSIM
     // TMP can't get light sleep PWM working on ESP32C3 
     uint32_t startMs = millis();
@@ -985,42 +539,7 @@ void lightSleep(int ms) {
     esp_light_sleep_start();
 }
 
-bool wifiConnect() { 
-    OUT("connecting");
-    wifiDisconnect(); 
-    j.jw.enabled = true;
-    j.mqtt.active = false;
-    j.jw.onConnect([](){});
-    j.jw.autoConnect();
-    for(int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) { 
-        delay(500);
-        wdtReset();
-    }
-    String ssid = WiFi.SSID(), ip = WiFi.localIP().toString();
-    OUT("Connected to AP '%s', IP=%s, channel=%d, RSSI=%d\n",
-        ssid.c_str(), ip.c_str(), WiFi.channel(), WiFi.RSSI());
-    return WiFi.status() == WL_CONNECTED;
-}
 
-void wifiDisconnect() { 
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
-    j.jw.enabled = false;
-}
-
-string floatRemoveTrailingZeros(string &s) {
-#ifndef CSIM // burns up too much time in simulation
-    //s = regex_replace(s, regex("[.]*[0]+}"), "}");
-    //s = regex_replace(s, regex("[.]*[0]+,"), ",");
-    //s = regex_replace(s, regex("[.]*[0]+]"), "]");
-    s = regex_replace(s, regex("[.][0]+ "), " ");
-    s = regex_replace(s, regex("[.][0]+\""), "\"");
-    s = regex_replace(s, regex("[.][0]+,"), ",");
-#endif
-    return s;
-}
-
-#include "RollingLeastSquares.h"
 class WorldSim {
 public:
   long double bv1 = 2100, bv2 = 1500, intT = 0, intH = 0, extT = 0, extH = 0;
@@ -1037,13 +556,13 @@ public:
   RollingAverage<float, 8> intTA, intHA, extTA, extHA;
   void run(int pwm) {
     now = millis();
-    if (secTick(9)) { 
+    if (secTick(8)) { 
         if (hal->digitalRead(pins.power)) {
             bv1 = min(2666.0L, bv1 + .000003L * speedUp);
         } else {
             bv1 = max(900.0L, bv1 - .000001L * speedUp);
         }
-        float day = deepsleepMs.millis() / 3600000.0 / 24 * speedUp;
+        float day = realtimeMs.millis() / 3600000.0 / 24 * speedUp;
         intTA.add(max(2.0, cos(day * 2 * M_PI) * 30 - 4) + pwm * 0.3);
         intT = intTA.average();
         extTA.add(max(2.0, cos(day * 2 * M_PI) * 35 - 2));
