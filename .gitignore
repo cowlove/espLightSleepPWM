@@ -5,7 +5,6 @@ csim
 *.out
 build
 build-*
-deploy.sh
 firmware.ver
 gnuplot.dat
 planedata.dat
@@ -18,3 +17,5 @@ quick-*.sh
 fs
 out
 f/
+jimlib
+*.out.*

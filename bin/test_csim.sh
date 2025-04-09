@@ -16,7 +16,7 @@ fi
 
 if [[ $OPT == *p* ]]; then 
 echo Plotting...
-cat ./out/csim.out |  ./iso_date_parser.py fanPwm Tint.v Tamb.v Tex1.v bv2 >  plane.dat
+cat ./out/csim.out |  ./bin/iso_date_parser.py fanPwm Tint.v Tamb.v Tex1.v bv2 >  plane.dat
 gnuplot -e "set grid;
 f='./plane.dat'; 
 set title 'Refreshed $age minutes ago'; 
