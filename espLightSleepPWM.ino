@@ -1,6 +1,6 @@
 #ifndef CSIM
-#include "driver/ledc.h"
-#include "rom/uart.h"
+//#include "driver/ledc.h"
+//#include "rom/uart.h"
 #include <HTTPClient.h>
 #include <esp_sleep.h>
 #include <LittleFS.h>
@@ -563,10 +563,10 @@ public:
         wsim.run(pwm);
         
         if (dht3) 
-            DHT::csim.set(dht3->pin, wsim.intT, wsim.intH);
+            DHT::csim_set(dht3->pin, wsim.intT, wsim.intH);
         SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
         if (sensor) 
-            DHT::csim.set(sensor->dht.pin, wsim.extT, wsim.extH);
+            DHT::csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
         
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
         ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);
