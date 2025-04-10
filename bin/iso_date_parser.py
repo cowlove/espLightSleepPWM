@@ -39,6 +39,8 @@ for line in	io.TextIOWrapper(sys.stdin.buffer, errors='ignore'):
                             print(val, end=" ")
                         print("");
     except Exception as e:
-        print("Exception:",end="")
+        print("ERROR Exception:",end="")
         print(e)
+        print("ERROR ",end="")
+        print(line)
         #print ("")

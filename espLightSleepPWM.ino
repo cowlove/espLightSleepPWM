@@ -106,8 +106,6 @@ void setHITL();
 SPIFFSVariable<string> configString("/configString3", "");
 DeepSleepElapsedTimer realtimeMs("/deepsleep");
 
-//bool wifiConnect();
-//void wifiDisconnect();
 void readConfig(); 
 void saveConfig(); 
 void printConfig(); 
@@ -119,21 +117,17 @@ class SimplePID {
 public:
     float pgain = 1, igain = 1, dgain = 1, fgain = 10, maxI = 10;
     float lastError = -1, iSum = 0;
-    bool operator ==(const SimplePID &b) { 
-        return memcmp((void *)this, (void *)&b, sizeof(*this)) == 0;
-    }
     float calc(float err) {
         iSum += err;
         iSum = max(-maxI, min(maxI, iSum));
         float rval = pgain * err + igain * iSum + dgain * (lastError - err);
         lastError = err;
         return rval * fgain; 
-     }
+    }
     bool convertToJson(JsonVariant dst) const { 
-        char buf[128];
-        snprintf(buf, sizeof(buf), "P=%f I=%f D=%f F=%f L=%f S=%f MI=%f", 
+        string s = sfmt("P=%f I=%f D=%f F=%f L=%f S=%f MI=%f", 
             pgain, igain, dgain, fgain, lastError, iSum, maxI);
-        return dst.set(buf);
+        return dst.set(s);
     }
     void convertFromJson(JsonVariantConst src) { 
         if(src.as<const char *>() != NULL)
@@ -141,6 +135,48 @@ public:
                 &pgain, &igain, &dgain, &fgain, &lastError, &iSum, &maxI);
     }
 };
+
+class GenericData { 
+public:
+    template <class T> 
+    struct DataType {
+        DataType() {}
+        DataType(const T &v) : valid(true), value(v) {} 
+        T value;
+        bool valid = false;
+        DataType &operator =(const T&v) { valid = true; value =v; return *this; }
+    };
+    DataType<float> _double;
+    DataType<string> _string;
+    DataType<int> _int;
+
+    GenericData &operator =(double v) { _double = v; return *this;  } 
+    GenericData &operator =(const string &v) { _string = v; return *this; } 
+    GenericData &operator =(int v) { _int = v; return *this; } 
+    template<class T> bool is();
+    template<class T> T as();
+
+    //template<> bool is<int>() { return _int.valid; }
+    //template<> bool is<float>() { return _string.valid; }
+    //template<> float as<float>() { return _float.value; }
+    //template<> int as<int>() { return _int.value; }
+    //template<> string as<string>() { return _string.value; }
+};
+template<> bool GenericData::is<double>() { return _double.valid; }
+template<> bool GenericData::is<int>() { return _int.valid; }
+template<> bool GenericData::is<string>() { return _string.valid; }
+template<> int    GenericData::as<int>   () { return _int.value; }
+template<> double GenericData::as<double> () { return _double.value; }
+template<> string GenericData::as<string>() { return _string.value; }
+
+int foo() { 
+    map<string,GenericData> m;
+    m["foo"] = 1;
+    if (m["foo"].as<int>() == 1) m["boo"] = "OK";
+    m["bar"] = 4.232;
+    if (m["foo"].is<int>()) return m["foo"].as<int>();
+    return 0;
+}
 
 struct Config {
     SimplePID pid;

@@ -1,6 +1,10 @@
 #!/bin/bash
 #
-cat $1 |  ./bin/iso_date_parser.py fanPwm Tint.v Tamb.v Tex1.v bv2 >  ./out/plane.dat; gnuplot -e "set grid;
+cat $1 |  ./bin/iso_date_parser.py fanPwm Tint.v Tamb.v Tex1.v bv2 \
+       | grep -v ERROR \
+       >  ./out/plane.dat; 
+       
+gnuplot -e "set grid;
 f='./out/plane.dat'; 
 set title 'Refreshed $age minutes ago'; 
 set terminal qt size 1800,800;
