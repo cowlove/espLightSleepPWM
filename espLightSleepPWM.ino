@@ -352,17 +352,18 @@ void loop() {
     sensorServer.run();
 
     // Serial log 
-    if (j.secTick(1) || j.once()) {
+    if (j.secTick(2) || j.once()) {
         //while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
-        OUT("Q %2d lastl %4.0f sseen %d lasts %.0f ssr %.0f  "
-            "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d",
+        OUT("Q %d lastl %3.0f snsrs %d lasts %.0f ssr %.0f "
+            "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d/%d heap %d,%d",
             (int)logger.spiffsReportLog.size(), 
             (int)logger.postPeriodTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
             vpdInt, hal->avgAnalogRead(pins.bv1), pwm, hal->digitalRead(pins.power),
-            LittleFS.usedBytes()
+            LittleFS.usedBytes(), LittleFS.totalBytes(), ESP.getMinFreeHeap(),
+            ESP.getFreeHeap()
         );
     }
 
