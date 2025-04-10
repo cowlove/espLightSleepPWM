@@ -207,7 +207,7 @@ void setup() {
     using namespace FailActions;
     logger.postFailTimer.setFailStrategy({
         {1/*fail count*/, WaitMin(.5)}, 
-        {3, WaitMin(1)},
+        {3, WaitMin(5)},
         {5, IncreaseWait(2)},
         {10, Callback([](){
             OUT("Too many failures, formatting flash and resetting");
@@ -549,13 +549,15 @@ public:
                 doc["CONFIG"] = simConfig;
                 result = "";
                 serializeJson(doc, result);
+                if (SIMFAILURE("http-post")) 
+                    return -123;
                 return 200;
             });
         client1.csimOverrideMac("EC64C9986F2C");
-        onDeepSleep([this](uint64_t usec) {
-            client1.setPartialDeepSleep(usec);
-         });
-         //WiFi.simulatedFailMinutes = 1;
+        csim_onDeepSleep([this](uint64_t usec) {
+            client1.prepareSleep(usec / 1000);
+        });
+        //WiFi.simulatedFailMinutes = 1;
     }
     void loop() override {
         int pow = digitalRead(pins.power);
