@@ -21,7 +21,7 @@ csim:
 	make -f Makefile.csim csim
 
 csim-clean: 
-	make -f Makefile.csim clean 
+	make -f Makefile.csim csim clean 
 
 fixtty:
 	stty -F ${UPLOAD_PORT} -hupcl -crtscts -echo raw 115200

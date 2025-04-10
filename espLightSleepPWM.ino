@@ -106,6 +106,8 @@ void setHITL();
 SPIFFSVariable<string> configString("/configString3", "");
 DeepSleepElapsedTimer realtimeMs("/deepsleep");
 
+//bool wifiConnect();
+//void wifiDisconnect();
 void readConfig(); 
 void saveConfig(); 
 void printConfig(); 
@@ -117,17 +119,21 @@ class SimplePID {
 public:
     float pgain = 1, igain = 1, dgain = 1, fgain = 10, maxI = 10;
     float lastError = -1, iSum = 0;
+    bool operator ==(const SimplePID &b) { 
+        return memcmp((void *)this, (void *)&b, sizeof(*this)) == 0;
+    }
     float calc(float err) {
         iSum += err;
         iSum = max(-maxI, min(maxI, iSum));
         float rval = pgain * err + igain * iSum + dgain * (lastError - err);
         lastError = err;
         return rval * fgain; 
-    }
+     }
     bool convertToJson(JsonVariant dst) const { 
-        string s = sfmt("P=%f I=%f D=%f F=%f L=%f S=%f MI=%f", 
+        char buf[128];
+        snprintf(buf, sizeof(buf), "P=%f I=%f D=%f F=%f L=%f S=%f MI=%f", 
             pgain, igain, dgain, fgain, lastError, iSum, maxI);
-        return dst.set(s);
+        return dst.set(buf);
     }
     void convertFromJson(JsonVariantConst src) { 
         if(src.as<const char *>() != NULL)
