@@ -11,7 +11,7 @@ set terminal qt size 1800,800;
     set timefmt '%s'; 
     set grid; 
     set format x '%a %l:%M%p'; 
-    p [*:*][0:16]  
+    p [*:*][0:30]  
     3.6 title 'Threshold'
     ,f u 1:4 w l title 'Ambient VPD'
     ,f u 1:3 w l title 'Cockpit Interior VPD' 

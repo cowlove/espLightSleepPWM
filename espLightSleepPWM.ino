@@ -222,7 +222,6 @@ void setup() {
 
     readConfig();
     printConfig();
-    OUT("REBOOT REASON %d", getResetReason(0));
     if (getResetReason(0) != 5/*DEEP SLEEP*/) { 
         forcePost = true;  
         logger.postFailTimer.reset();
@@ -452,10 +451,11 @@ void readConfig() {
 }
 
 void printConfig() { 
-    JsonDocument d2;
+    JsonDocument doc;
+    doc["CONFIG"] = config;
     string s;
-    d2["CONFIG"] = config;
-    serializeJson(d2, s);
+    serializeJson(doc, s);
+    floatRemoveTrailingZeros(s);
     OUT("%s\n", s.c_str());
 }
 
