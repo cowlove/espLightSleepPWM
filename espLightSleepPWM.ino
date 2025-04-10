@@ -136,38 +136,6 @@ public:
     }
 };
 
-class GenericData { 
-public:
-    template <class T> 
-    struct DataType {
-        DataType() {}
-        DataType(const T &v) : valid(true), value(v) {} 
-        T value;
-        bool valid = false;
-        DataType &operator =(const T&v) { valid = true; value =v; return *this; }
-    };
-    DataType<float> _double;
-    DataType<string> _string;
-    DataType<int> _int;
-
-    GenericData &operator =(double v) { _double = v; return *this;  } 
-    GenericData &operator =(const string &v) { _string = v; return *this; } 
-    GenericData &operator =(int v) { _int = v; return *this; } 
-    template<class T> bool is();
-    template<class T> T as();
-
-    //template<> bool is<int>() { return _int.valid; }
-    //template<> bool is<float>() { return _string.valid; }
-    //template<> float as<float>() { return _float.value; }
-    //template<> int as<int>() { return _int.value; }
-    //template<> string as<string>() { return _string.value; }
-};
-template<> bool GenericData::is<double>() { return _double.valid; }
-template<> bool GenericData::is<int>() { return _int.valid; }
-template<> bool GenericData::is<string>() { return _string.valid; }
-template<> int    GenericData::as<int>   () { return _int.value; }
-template<> double GenericData::as<double> () { return _double.value; }
-template<> string GenericData::as<string>() { return _string.value; }
 
 int foo() { 
     map<string,GenericData> m;
