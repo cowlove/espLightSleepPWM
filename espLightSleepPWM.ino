@@ -142,16 +142,6 @@ public:
     }
 };
 
-
-int foo() { 
-    map<string,GenericData> m;
-    m["foo"] = 1;
-    if (m["foo"].as<int>() == 1) m["boo"] = "OK";
-    m["bar"] = 4.232;
-    if (m["foo"].is<int>()) return m["foo"].as<int>();
-    return 0;
-}
-
 struct Config {
     SimplePID pid;
     float sampleTime;
