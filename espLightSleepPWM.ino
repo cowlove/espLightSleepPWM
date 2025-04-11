@@ -231,9 +231,9 @@ void setup() {
 class RemoteSensorModuleDHT : public RemoteSensorModule {
 public:
     RemoteSensorModuleDHT(const char *mac) : RemoteSensorModule(mac) {}
-    //SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
+    SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
     SensorDHT temp = SensorDHT(this, "TEMP", 26);
-    //SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
+    SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
     SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
     SensorOutput led = SensorOutput(this, "LED", 22, 0);
     SensorMillis m = SensorMillis(this);

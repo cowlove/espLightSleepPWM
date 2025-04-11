@@ -4,6 +4,10 @@ python3 "/home/jim/.arduino15/packages/esp32/tools/esptool_py/4.5.1/esptool.py" 
 TODO: found examples [2025-03-31T00:57:46.712Z]  where power pin left high, probably 
 old code.  Now thinking it might be buggy hardware
 
+TODO: esp32 build seems to be posting when sensorServer.getWaitTime() should be negative, and delays the receipt of
+incoming sensor report 
+y
+
 TODO: Big cleanup of timekeeping, esp in sensorServerNetwork - change variable names
 to avoid phrases like "lastLogTime", instead use "logPeriod", "lastLogTimestampMs"
 use "Sec", "Ms", "Us" suffixes on variable names. 
