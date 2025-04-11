@@ -13,7 +13,10 @@ endif
 
 GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always --tags)"
 BUILD_EXTRA_FLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
-PART_FILE = ./partitions.csv 
+
+PART_FILE=${HOME}/.arduino15/packages/esp32/hardware/esp32/2.0.17/tools/partitions/min_spiffs.csv
+#PART_FILE = ./partitions.csv 
+
 include ${HOME}/Arduino/libraries/makeEspArduino/makeEspArduino.mk
 
 .PHONY: csim
