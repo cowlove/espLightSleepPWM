@@ -20,7 +20,7 @@ JStuff j;
 string getServerName() { 
     if (WiFi.SSID() == "CSIM") return "http://192.168.68.118:8080";
     if (WiFi.SSID() == "ClemmyNet") return "http://192.168.68.118:8080";
-    if (WiFi.SSID() == "Station 54") return "http://192.168.68.73:8080";
+   // if (WiFi.SSID() == "Station 54") return "http://192.168.68.73:8080";
     return "http://vheavy.com";
 }
 using std::string;
@@ -182,6 +182,12 @@ DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 
 void setup() {
+    uint8_t newMACAddress[] = {0x32, 0xAE, 0xA4, 0x07, 0x0D, 0x60};
+    esp_err_t err = esp_base_mac_addr_set(newMACAddress);
+    if (err == ESP_OK) 
+        OUT("Success changing Mac Address");
+    else 
+        OUT("Failed to set mac address");
     hal->pinMode(pins.dhtGnd, OUTPUT);
     hal->digitalWrite(pins.dhtGnd, 0);
     hal->pinMode(pins.dhtVcc, OUTPUT);
