@@ -350,9 +350,8 @@ void loop() {
     //}
     sensorServer.run();
 
-    // Serial log 
+    // Make a serial log entry
     if (j.secTick(2) || j.once()) {
-        //while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
         OUT("Q %d nextl %.0f nextp %.0f snsrs %d lastsnsr %.0f ssr %.0f "
             "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d/%d heap %d,%d",
