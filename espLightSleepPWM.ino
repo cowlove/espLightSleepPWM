@@ -192,7 +192,7 @@ void setup() {
     if (getMacAddress() == "08F9E0F6E0B0") setHITL();
     if (getMacAddress() == "F0F5BD723D08") setHITL();
     if (getMacAddress() == "CCBA9716E0D8") setHITL();
-    if (getMacAddress() == "D48AFCA4D0BC") setHITL();
+    if (getMacAddress() == "A085E30E3A9C") setHITL();
 
     
     j.begin();
@@ -299,7 +299,7 @@ void readSensors(JsonDocument &doc) {
 }
 
 bool alreadyLogged = false;
-uint32_t sampleStartTime = 0;
+uint32_t sampleStartTs = 0;
 int pwm = 0;
 
 int setFan(int pwm) { 
@@ -354,10 +354,11 @@ void loop() {
     if (j.secTick(2) || j.once()) {
         //while(millis() < 750) delay(1); // HACK, DHT seems to need about 650ms of stable power before it can be read 
         vpdInt = getVpd(dht3);
-        OUT("Q %d lastl %3.0f snsrs %d lasts %.0f ssr %.0f "
+        OUT("Q %d nextl %.0f nextp %.0f snsrs %d lastsnsr %.0f ssr %.0f "
             "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d/%d heap %d,%d",
             (int)logger.spiffsReportLog.size(), 
-            (int)logger.postPeriodTimer.elapsed() / 1000.0, 
+            config.sampleTime * 60 - (millis() - sampleStartTs) / 1000.0,
+            logger.postFailTimer.getWaitMinutes() * 60 - logger.postPeriodTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
             calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
             vpdInt, hal->avgAnalogRead(pins.bv1), pwm, hal->digitalRead(pins.power),
@@ -366,9 +367,11 @@ void loop() {
         );
     }
 
-    // Run PID loop and log data
+    // Run PID loop and log data.  We log after waiting sensorWaitSec every time we wake up, whether sleep or not.
+    // Thereafter, log every config.sampleTime, corrdinated by resetting alreadyLogged and sampleStartTime below.
     if (alreadyLogged == false && 
-        ((millis() - sampleStartTime) > sensorWaitSec * 1000 || sensorServer.getSleepRequest() > 0 || forcePost)) {
+        ((millis() - sampleStartTs) > sensorWaitSec * 1000 || sensorServer.getSleepRequest() > 0 || forcePost)) {
+        //  TODO: || seems like an error ... &&?             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
         float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
         if (!isnan(vpdInt) 
             && (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint)) {
@@ -405,10 +408,10 @@ void loop() {
     }
     
     // Decide if & how long to sleep
-    if (alreadyLogged == true && millis() - sampleStartTime > config.sampleTime * 60 * 1000) { 
+    if (alreadyLogged == true && millis() - sampleStartTs > config.sampleTime * 60 * 1000) { 
         // reset counter, will make another log event after
         //OUT("%09.3f Resetting sampleStartTime timer for %.2f", millis()/1000.0, config.sampleTime);
-        sampleStartTime = millis();
+        sampleStartTs = millis();
         alreadyLogged = false;
     }
     if (hal->avgAnalogRead(pins.bv2) < config.minBatVolt) {
@@ -419,7 +422,7 @@ void loop() {
     // should only sleep if sensorServer.getSleepRequest() is valid and > 0.  Then sleep
     // the minimum of the two sleep requests
     int sensorLoopSleepMs = sensorServer.getSleepRequest() * 1000;
-    int sampleLoopSleepMs = config.sampleTime * 60 * 1000 - (millis() - sampleStartTime);
+    int sampleLoopSleepMs = config.sampleTime * 60 * 1000 - (millis() - sampleStartTs);
     int sleepMs = min(sampleLoopSleepMs, sensorLoopSleepMs);
 
 
@@ -437,7 +440,7 @@ void loop() {
         } else { 
             lightSleep(sleepMs);
             alreadyLogged = false;  // TODO clean up this part that resets the loop like a reboot
-            sampleStartTime = millis();
+            sampleStartTs = millis();
             vpdInt = getVpd(dht3);
         }        
     }
