@@ -11,7 +11,7 @@ else
 	BUILD_EXTRA_FLAGS += -DI2S
 endif
 
-GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always --tags)"
+GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always)"
 BUILD_EXTRA_FLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
 
 PART_FILE=${HOME}/.arduino15/packages/esp32/hardware/esp32/2.0.17/tools/partitions/min_spiffs.csv

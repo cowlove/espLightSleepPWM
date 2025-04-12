@@ -15,7 +15,7 @@ echo Building for ${BOARD}:${BOARD_OPTS} uploading to ${PORT}
 
 # As of 3/30 8:30am this is the best working version of make_build
 
-GIT_VERSION=`git describe --abbrev=8 --dirty --always --tags`
+GIT_VERSION=`git describe --abbrev=6 --dirty --always`
 
 cd "`dirname $0`"
 SKETCH="`basename \`pwd\``"
