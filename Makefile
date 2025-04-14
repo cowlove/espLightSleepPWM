@@ -46,6 +46,8 @@ backtrace:
 clean-all:
 	rm -rf ./build
 	rm -f ./esp32*.mk
+	${MAKE} csim-clean
+	
 ##############################################
 # CSIM rules 
 
