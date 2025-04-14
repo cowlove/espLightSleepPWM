@@ -73,7 +73,7 @@ for o in objs:
 
 for ar in archiveCmds:
     print(ar + ": " + archiveDeps[ar])
-    print(archiveCmds[ar])
+    print("\t@echo `echo " + ar + "`\n\t" + archiveCmds[ar])
 
 print("clean:")
 for o in objs + (binFile, elf,):
