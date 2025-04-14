@@ -44,9 +44,9 @@ backtrace:
 	tr ' ' '\n' | addr2line -f -i -e ./build/${BOARD}/*.elf
 
 clean-all:
+	${MAKE} csim-clean
 	rm -rf ./build
 	rm -f ./esp32*.mk
-	${MAKE} csim-clean
 
 ##############################################
 # CSIM rules 
