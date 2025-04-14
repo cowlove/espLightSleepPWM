@@ -1,8 +1,8 @@
-GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always --tags)"
+GIT_VERSION := $(shell git describe --abbrev=6 --dirty --always)
 MAIN_NAME=$(shell basename `pwd`)
 BUILD_DIR=./build/csim
-MAKEFLAGS:=-j4 -s
-
+MAKEFLAGS:=-j4
+CCACHE=ccache
 LIBS=esp32jimlib Arduino_CRC32 ArduinoJson
 
 SRC_DIRS=$(foreach L,$(LIBS),${HOME}/Arduino/libraries/${L}/src)
@@ -17,11 +17,11 @@ CFLAGS=${OPT} -g -MMD -fpermissive -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCS
 
 ${BUILD_DIR}/%.o: %.cpp 
 	echo $@
-	g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@
+	${CCACHE} g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@
 
 ${BUILD_DIR}/%.o: %.ino
 	echo $@
-	g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@
+	${CCACHE} g++ ${CFLAGS} -x c++ -c ${INC} $< -o $@
 
 ${MAIN_NAME}_csim: ${OBJS} ${BUILD_DIR}/${MAIN_NAME}.o
 	echo $@
