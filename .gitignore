@@ -19,3 +19,4 @@ out
 f/
 jimlib
 *.out.*
+esp32*.mk

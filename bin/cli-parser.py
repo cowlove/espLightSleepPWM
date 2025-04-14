@@ -43,7 +43,7 @@ print("\tcat ./" + sketch + ".ino > $@")
 print(elf, end=": ")
 for o in objs:
     print(o, end = " ")
-print("\n\t" + elfCmd)
+print("\n\t@echo `basename " + elf + "`\n\t@" + elfCmd)
 
 print(binFile + ": " + elf)
 print("\t" + binCmd)
@@ -54,11 +54,11 @@ print("upload: " + binFile)
 print("\t" + uploadCmd)
 
 for o in objs:
-    print(o + ":\n\tccache " + cmds[o])
+    print(o + ":\n\t@echo `basename " + o + "`\n\tccache " + re.sub("^([^ ]+) ", r"\1 ${EXTRA_CFLAGS} ", cmds[o]))
 
 print("clean:")
-for o in objs + (elf,):
-    print("\trm " + o)
+for o in objs + (binFile, elf,):
+    print("\t-@rm -f " + o)
 
 for o in objs:
     print ("-include " + re.sub("[.]o$", ".d", o))
