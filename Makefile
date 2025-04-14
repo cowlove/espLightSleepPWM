@@ -47,7 +47,7 @@ clean-all:
 	rm -rf ./build
 	rm -f ./esp32*.mk
 	${MAKE} csim-clean
-	
+
 ##############################################
 # CSIM rules 
 
@@ -63,19 +63,19 @@ CSIM_CFLAGS+=-g -MMD -fpermissive -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSI
 #CSIM_CFLAGS+=-DGPROF=1 -pg
 #CSIM_CFLAGS+=-O2
 
-${CSIM_BUILD_DIR}/%.o: %.cpp ${CSIM_BUILD_DIR}
+${CSIM_BUILD_DIR}/%.o: %.cpp 
 	echo $@
 	${CCACHE} g++ ${CSIM_CFLAGS} -x c++ -c ${CSIM_INC} $< -o $@
 
-${CSIM_BUILD_DIR}/%.o: %.ino ${CSIM_BUILD_DIR}
+${CSIM_BUILD_DIR}/%.o: %.ino
 	echo $@
 	${CCACHE} g++ ${CSIM_CFLAGS} -x c++ -c ${CSIM_INC} $< -o $@
 
-${SKETCH_NAME}_csim: ${CSIM_OBJS} ${CSIM_BUILD_DIR}/${SKETCH_NAME}.o
+${SKETCH_NAME}_csim: ${CSIM_BUILD_DIR} ${CSIM_OBJS} ${CSIM_BUILD_DIR}/${SKETCH_NAME}.o
 	echo $@
 	g++ -g ${CSIM_CFLAGS} ${CSIM_OBJS} ${CSIM_BUILD_DIR}/${SKETCH_NAME}.o -o $@         
 
-csim: ${SKETCH_NAME}_csim ${CSIM_BUILD_DIR}
+csim: ${SKETCH_NAME}_csim 
 	cp $< $@
 
 ${CSIM_BUILD_DIR}:
