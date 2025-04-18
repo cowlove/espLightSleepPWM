@@ -11,6 +11,7 @@ objs = ()
 cmds = {}
 archiveDeps = {}
 archiveCmds = {}
+binCmd = ""
 
 for line in map(str.rstrip, sys.stdin):
     m = re.search('-o ([^ ]+[.]((bin)|(o)|(elf)))', line)
@@ -19,7 +20,7 @@ for line in map(str.rstrip, sys.stdin):
             elfCmd = line
             elf = m.group(1)
         elif m.group(2) == "bin":
-            binCmd = line
+            binCmd += "\t" + line + "\n"
             binFile = m.group(1)
         else:
             o = m.group(1)
@@ -36,7 +37,7 @@ for line in map(str.rstrip, sys.stdin):
     m = re.search('FQBN: esp32:esp32:([^:]+)', line)
     if m:
         board = m.group(1)
-    m = re.search('elf-ar cr (.*[.]a) (.*[.]o)', line)
+    m = re.search('-ar cr (.*[.]a) (.*[.]o)', line)
     if m:
         if archiveDeps.get(m.group(1)) == None:
             archiveDeps[m.group(1)] = ""
@@ -61,7 +62,7 @@ for ar in archiveCmds:
 print("\n\t@echo `basename " + elf + "`\n\t@" + elfCmd)
 
 print(binFile + ": " + elf)
-print("\t" + binCmd)
+print(binCmd)
 
 print("elf: " + elf)
 print("bin: " + binFile)
