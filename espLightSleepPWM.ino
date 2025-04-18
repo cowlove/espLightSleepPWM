@@ -525,10 +525,10 @@ public:
 };
 
 #ifdef CSIM
-class Csim : public ESP32sim_Module {
+class CsimSketch : public Csim_Module {
     WorldSim wsim;
 public:
-    Csim() {
+    CsimSketch() {
         ESPNOW_sendHandler = new ESPNOW_csimOneProg();
     }
     RemoteSensorClient client1; 
@@ -564,7 +564,7 @@ public:
     }
     void loop() override {
         int pow = digitalRead(pins.power);
-        int pwm = ESP32sim_currentPwm[2];
+        int pwm = Csim_currentPwm[2];
         wsim.run(pwm);
         
         if (dht3) 
@@ -573,8 +573,8 @@ public:
         if (sensor) 
             DHT::csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
         
-        ESP32sim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
-        ESP32sim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);
+        Csim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
+        Csim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);
         client1.run();
     }
 } csim;
