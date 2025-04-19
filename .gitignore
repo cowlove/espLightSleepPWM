@@ -20,3 +20,5 @@ f/
 jimlib
 *.out.*
 esp32*.mk
+esp32csim
+csim.mk

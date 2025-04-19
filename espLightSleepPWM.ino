@@ -14,6 +14,7 @@
 #include "sensorNetworkEspNOW.h"
 #include "serialLog.h"
 #include "RollingLeastSquares.h"
+#include "simulatedFailures.h"
 
 JStuff j;
 	
