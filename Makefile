@@ -53,6 +53,7 @@ clean-all:
 
 CSIM_BUILD_DIR=./build/csim
 CSIM_LIBS=esp32jimlib Arduino_CRC32 ArduinoJson
+CSIM_LIBS+=esp32csim
 CSIM_SRC_DIRS=$(foreach L,$(CSIM_LIBS),${HOME}/Arduino/libraries/${L}/src)
 CSIM_SRCS=$(foreach DIR,$(CSIM_SRC_DIRS),$(wildcard $(DIR)/*.cpp)) 
 CSIM_SRC_WITHOUT_PATH = $(notdir $(CSIM_SRCS))
