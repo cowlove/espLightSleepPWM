@@ -1,4 +1,4 @@
-BOARD ?= esp32
+BOARD ?= esp32c3
 PORT ?= /dev/ttyUSB0
 
 GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always)"
@@ -7,16 +7,16 @@ SKETCH_NAME=$(shell basename `pwd`)
 BOARD_OPTIONS = PartitionScheme=min_spiffs
 
 ifeq ($(BOARD),esp32s3)
-	BOARD_OPTIONS += ,CDCOnBoot=cdc
+	BOARD_OPTIONS := ${BOARD_OPTIONS},CDCOnBoot=cdc
 	PORT=/dev/ttyACM0
 endif
 ifeq ($(BOARD),esp32c3)
-	BOARD_OPTIONS += ,CDCOnBoot=cdc
+	BOARD_OPTIONS := ${BOARD_OPTIONS},CDCOnBoot=cdc
 	PORT=/dev/ttyACM0
 endif
 
 CCACHE=ccache
-MAKEFLAGS=-j4 -s 
+#MAKEFLAGS=-s
 
 usage:
 	@echo make \{elf,bin,upload,cat,uc\(upload then cat\),csim,clean,csim-clean\}
@@ -24,8 +24,8 @@ usage:
 include ${BOARD}.mk
 
 ${BOARD}.mk:
-	@echo Running arduino-cli compile --clean, this could take a while.  Upload failure is OK.
-	arduino-cli -v compile --clean --build-path ./build/${BOARD}/ \
+	@echo Running arduino-cli compile , this could take a while.  Upload failure is OK.
+	arduino-cli -v compile --build-path ./build/${BOARD}/ \
 		-b esp32:esp32:${BOARD} --board-options ${BOARD_OPTIONS} \
 		-u -p ${PORT} | bin/cli-parser.py > ${BOARD}.mk
 
@@ -52,13 +52,16 @@ clean-all:
 # CSIM rules 
 
 CSIM_BUILD_DIR=./build/csim
-CSIM_LIBS=esp32jimlib Arduino_CRC32 ArduinoJson
+CSIM_LIBS=esp32jimlib Arduino_CRC32 ArduinoJson Adafruit_HX711
 CSIM_LIBS+=esp32csim
 CSIM_SRC_DIRS=$(foreach L,$(CSIM_LIBS),${HOME}/Arduino/libraries/${L}/src)
+CSIM_SRC_DIRS+=$(foreach L,$(CSIM_LIBS),${HOME}/Arduino/libraries/${L})
+CSIM_SRC_DIRS+=$(foreach L,$(CSIM_LIBS),${HOME}/Arduino/libraries/${L}/src/csim_include)
 CSIM_SRCS=$(foreach DIR,$(CSIM_SRC_DIRS),$(wildcard $(DIR)/*.cpp)) 
 CSIM_SRC_WITHOUT_PATH = $(notdir $(CSIM_SRCS))
 CSIM_OBJS=$(CSIM_SRC_WITHOUT_PATH:%.cpp=${CSIM_BUILD_DIR}/%.o)
 CSIM_INC=$(foreach DIR,$(CSIM_SRC_DIRS),-I${DIR})
+
 
 CSIM_CFLAGS+=-g -MMD -fpermissive -DGIT_VERSION=\"${GIT_VERSION}\" -DESP32 -DCSIM -DUBUNTU 
 #CSIM_CFLAGS+=-DGPROF=1 -pg

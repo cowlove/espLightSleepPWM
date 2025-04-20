@@ -417,7 +417,7 @@ void loop() {
     if (hal->avgAnalogRead(pins.bv2) < config.minBatVolt) {
         OUT("Disabling fan due to battery voltage %.1f/%.1f", hal->avgAnalogRead(pins.bv2), config.minBatVolt);
         pwm = 0;
-    } else if (bv1 < 2350 && bv1 > 1000 && pwm == 0) {
+    } else if (bv1 < 2400 && bv1 > 1000 && pwm == 0) {
         pwm = 1; // minimal pwm setting to charge battery 
     }
     pwm = setFan(pwm);
