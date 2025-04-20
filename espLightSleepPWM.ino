@@ -193,7 +193,7 @@ void setup() {
     if (getMacAddress() == "08F9E0F6E0B0") setHITL();
     if (getMacAddress() == "F0F5BD723D08") setHITL();
     if (getMacAddress() == "CCBA9716E0D8") setHITL();
-    if (getMacAddress() == "083AF2B59110") setHITL();
+    if (getMacAddress() == "0CB815C2412C") setHITL();
 
     
     j.begin();
@@ -230,27 +230,52 @@ void setup() {
 }
 
 class RemoteSensorModuleDHT : public RemoteSensorModule {
+    public:
+        RemoteSensorModuleDHT(const char *mac) : RemoteSensorModule(mac) {}
+        SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
+        SensorDHT temp = SensorDHT(this, "TEMP", 26);
+        SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
+        SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
+        SensorOutput led = SensorOutput(this, "LED", 22, 0);
+        SensorMillis m = SensorMillis(this);
+        bool convertToJson(JsonVariant dst) const {
+            RemoteSensorModuleDHT &dh = *((RemoteSensorModuleDHT *)this);
+            float t = dst["t"] = round(dh.temp.getTemperature(), .01);
+            float h = dst["h"] = round(dh.temp.getHumidity(), .01);
+            dst["v"] = round(calcVpd(t, h), .01);
+            dst["b"] = round(dh.battery.asFloat(), .01);
+            dst["ms"] = m.asInt();
+            dst["err"] = dh.temp.getRetries();
+            return true;
+        } 
+    } ambientTempSensor1("auto");
+    
+class RemoteSensorModuleScale : public RemoteSensorModule {
 public:
-    RemoteSensorModuleDHT(const char *mac) : RemoteSensorModule(mac) {}
+    RemoteSensorModuleScale(const char *mac) : RemoteSensorModule(mac) {}
     SensorOutput gnd = SensorOutput(this, "GND", 27, 0);
     SensorDHT temp = SensorDHT(this, "TEMP", 26);
     SensorOutput vcc = SensorOutput(this, "VCC", 25, 1);
     SensorADC battery = SensorADC(this, "LIPOBATTERY", 33, .0017);
     SensorOutput led = SensorOutput(this, "LED", 22, 0);
     SensorMillis m = SensorMillis(this);
+    SensorOutput gnd2 = SensorOutput(this, "GND", 22, 0);
+    SensorOutput vcc2 = SensorOutput(this, "VCC", 19, 1);
+    SensorHX711 weight = SensorHX711(this, "WEIGHT", 23, 18);
     bool convertToJson(JsonVariant dst) const {
-        RemoteSensorModuleDHT &dh = *((RemoteSensorModuleDHT *)this);
+        RemoteSensorModuleScale &dh = *((RemoteSensorModuleScale *)this);
         float t = dst["t"] = round(dh.temp.getTemperature(), .01);
         float h = dst["h"] = round(dh.temp.getHumidity(), .01);
         dst["v"] = round(calcVpd(t, h), .01);
         dst["b"] = round(dh.battery.asFloat(), .01);
         dst["ms"] = m.asInt();
         dst["err"] = dh.temp.getRetries();
+        dst["weight"] = dh.weight.get();
         return true;
     } 
-} ambientTempSensor1("auto");
+} scaleSensor1("F8B3B77BBE20");
 
-RemoteSensorServer sensorServer({ &ambientTempSensor1 });
+RemoteSensorServer sensorServer({ &ambientTempSensor1, &scaleSensor1 });
 
 void yieldMs(int ms) {
     for(int i = 0; i < ms; i += 10) { 
