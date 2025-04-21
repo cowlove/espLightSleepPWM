@@ -1,3 +1,6 @@
+scale empty  WEIGHT=340443.00
+scale w book WEIGHT=713686.00
+
 
 python3 "/home/jim/.arduino15/packages/esp32/tools/esptool_py/4.5.1/esptool.py" --chip esp32c3 -p /dev/ttyACM0 erase_flash
 
