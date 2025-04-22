@@ -227,6 +227,7 @@ void setup() {
         forcePost = true;  
         logger.postFailTimer.reset();
     }
+    dsm().onDeepSleep([](int){ saveConfig(); });
 }
 
 class RemoteSensorModuleDHT : public RemoteSensorModule {
@@ -602,8 +603,8 @@ public:
         if (sensor) 
             DHT::csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
         
-        Csim_pinManager::manager->csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
-        Csim_pinManager::manager->csim_analogSet(pins.bv2, wsim.bv2);
+        Csim_pins().csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
+        Csim_pins().csim_analogSet(pins.bv2, wsim.bv2);
         client1.run();
     }
 } csim;
