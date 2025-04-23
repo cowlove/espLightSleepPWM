@@ -520,7 +520,7 @@ void lightSleep(int ms) {
 
 class WorldSim {
 public:
-  long double bv1 = 2100, bv2 = 1500, intT = 0, intH = 0, extT = 0, extH = 0;
+  long double bv1 = 2450, bv2 = 1500, intT = 0, intH = 0, extT = 0, extH = 0;
   float speedUp = 1.0;
   uint32_t lastRun = millis(), now = millis();
   bool firstLoop = true;
