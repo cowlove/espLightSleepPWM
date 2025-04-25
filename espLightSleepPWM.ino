@@ -348,16 +348,6 @@ int setFan(int pwm) {
 int testMode = 0;
 float vpdInt;
 void loop() {
-#if 1
-    BeaconSynchronizedWakeup bwakeup;
-    bwakeup.begin();
-    for (int sec = 0; sec < 5; sec++) {
-        delay(1000);          
-        wdtReset();
-    }  
-    OUT("bwakeup: %.2f", bwakeup.getSleepSec());
-    deepSleep(1000);
-#endif
     delay(1000);
     pwm = setFan(pwm); // power keeps getting turned on???
     sensorServer.synchPeriodMin = config.sensorTime;
@@ -384,7 +374,7 @@ void loop() {
     if (j.secTick(2) || j.once()) {
         vpdInt = getVpd(dht3);
         OUT("QQ %d nextl %.0f nextp %.0f snsrs %d lastsnsr %.0f ssr %.0f "
-            "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d/%d heap %d,%d",
+            "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d/%d heap %d,%d promRx %d",
             (int)logger.spiffsReportLog.size(), 
             config.sampleTime * 60 - (millis() - sampleStartTs) / 1000.0,
             logger.postFailTimer.getWaitMinutes() * 60 - logger.postPeriodTimer.elapsed() / 1000.0, 
@@ -392,7 +382,7 @@ void loop() {
             calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
             vpdInt, hal->avgAnalogRead(pins.bv1), pwm, hal->digitalRead(pins.power),
             LittleFS.usedBytes(), LittleFS.totalBytes(), ESP.getMinFreeHeap(),
-            ESP.getFreeHeap()
+            ESP.getFreeHeap(), ESPNowMux::Instance->bwakeup.getRxCount()
         );
     }
 
