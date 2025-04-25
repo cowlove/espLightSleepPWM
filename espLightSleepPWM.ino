@@ -37,6 +37,7 @@ using std::vector;
 //   NC                7           8        red     dhtvcc
 //   NC                21          20       blk     dhtgnd 
 
+
 #if defined(ARDUINO_ESP32C3_DEV) || defined(CSIM) || defined(ARDUINO_ESP32S3_DEV)
 struct {
     int dhtGnd = 20;    // black 
@@ -86,7 +87,7 @@ public:
             if (!isnan(*h) && !isnan(*t)) 
                 break;
             retries++;
-            OUT("DHT %lx read failure", dht);
+            OUT("DHT %p read failure", dht);
             wdtReset();
             yieldMs(1000);
         }
@@ -182,6 +183,7 @@ BatchWebLogger logger;
 DHT *dht1, *dht2, *dht3;
 bool forcePost = false;
 
+
 void setup() {
     hal->pinMode(pins.dhtGnd, OUTPUT);
     hal->digitalWrite(pins.dhtGnd, 0);
@@ -193,9 +195,8 @@ void setup() {
     if (getMacAddress() == "08F9E0F6E0B0") setHITL();
     if (getMacAddress() == "F0F5BD723D08") setHITL();
     if (getMacAddress() == "CCBA9716E0D8") setHITL();
-    if (getMacAddress() == "0CB815C2412C") setHITL();
+    if (getMacAddress() == "A0DD6C725410") setHITL();
 
-    
     j.begin();
     dht1 = new DHT(pins.dhtData1, DHT22);
     dht2 = new DHT(pins.dhtData2, DHT22);
@@ -347,16 +348,17 @@ int setFan(int pwm) {
 int testMode = 0;
 float vpdInt;
 void loop() {
-#if 0
-    for (int n = 0; n < 5; n++) { 
-        int x = hal->avgAnalogRead(pins.bv1);
-        int y = 0;//adc1_get_raw(ADC1_CHANNEL_1);
-        printf("analogRead(%d) %d %d\n", pins.bv1, x, y);
-        delay(100);
-    }
-    wdtReset();
-    return;
+#if 1
+    BeaconSynchronizedWakeup bwakeup;
+    bwakeup.begin();
+    for (int sec = 0; sec < 5; sec++) {
+        delay(1000);          
+        wdtReset();
+    }  
+    OUT("bwakeup: %.2f", bwakeup.getSleepSec());
+    deepSleep(1000);
 #endif
+    delay(1000);
     pwm = setFan(pwm); // power keeps getting turned on???
     sensorServer.synchPeriodMin = config.sensorTime;
 
@@ -463,7 +465,7 @@ void loop() {
 #ifdef GPROF // avoid deepsleep to make one long continuous profiling run 
         dsleep = false;
 #endif
-        if (dsleep) {  
+        if (dsleep) { 
             deepSleep(sleepMs);
             /* reboot */
         } else { 
@@ -564,8 +566,7 @@ public:
     RemoteSensorClient client1; 
     string dummy;
     void parseArg(char **&a, char **la) override {
-        if (strcmp(*a, "--dummy") == 0)
-                dummy = *(++a);
+        if (strcmp(*a, "--dummy") == 0) dummy = *(++a);
     }
     void setup() override {
         csim_flags.OneProg = true;
