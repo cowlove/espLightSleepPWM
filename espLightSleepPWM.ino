@@ -382,7 +382,7 @@ void loop() {
             calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
             vpdInt, hal->avgAnalogRead(pins.bv1), pwm, hal->digitalRead(pins.power),
             LittleFS.usedBytes(), LittleFS.totalBytes(), ESP.getMinFreeHeap(),
-            ESP.getFreeHeap(), ESPNowMux::Instance->bwakeup.getRxCount()
+            ESP.getFreeHeap(), defaultEspNowMux.bwakeup.getRxCount()
         );
     }
 
@@ -547,19 +547,17 @@ public:
 };
 
 #ifdef CSIM
+ESPNOW_csimOneProg defaultEspNow;
+Csim_RemoteSensorClientContext client1(0x1234);
+
 class CsimSketch : public Csim_Module {
     WorldSim wsim;
 public:
     CsimSketch() {
-        ESPNOW_sendHandler = new ESPNOW_csimOneProg();
+        defaultContext.espnow = &defaultEspNow; 
     }
-    RemoteSensorClient client1; 
     string dummy;
-    void parseArg(char **&a, char **la) override {
-        if (strcmp(*a, "--dummy") == 0) dummy = *(++a);
-    }
     void setup() override {
-        csim_flags.OneProg = true;
         HTTPClient::csim_onPOST("http://.*/log", 
             [](const char *url, const char *hdr, const char *data, string &result) {
                 JsonDocument doc;
@@ -577,10 +575,6 @@ public:
                     return -123;
                 return 200;
             });
-        client1.csimOverrideMac("EC64C9986F2C");
-        csim_onDeepSleep([this](uint64_t usec) {
-            client1.prepareSleep(usec / 1000);
-        });
         //WiFi.simulatedFailMinutes = 1;
     }
     void loop() override {
@@ -590,13 +584,12 @@ public:
         
         if (dht3) 
             DHT::csim_set(dht3->pin, wsim.intT, wsim.intH);
-        SensorDHT *sensor = (SensorDHT *)client1.findByName("TEMP");
+        SensorDHT *sensor = (SensorDHT *)client1.client.findByName("TEMP");
         if (sensor) 
             DHT::csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
         
         Csim_pins().csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
         Csim_pins().csim_analogSet(pins.bv2, wsim.bv2);
-        client1.run();
     }
 } csim;
 #endif

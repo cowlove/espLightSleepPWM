@@ -2,7 +2,7 @@ BOARD ?= esp32s3
 PORT ?= /dev/ttyACM0
 CHIP ?= esp32
 VERBOSE=1
-EXCLUDE_DIRS=/home/jim/Arduino/libraries/LovyanGFX
+EXCLUDE_DIRS=${HOME}/Arduino/libraries/lvgl|${HOME}/Arduino/libraries/LovyanGFX
 PART_FILE=${ESP_ROOT}/tools/partitions/min_spiffs.csv
 GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always)"
 
