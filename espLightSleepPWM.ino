@@ -326,8 +326,8 @@ void readSensors(JsonDocument &doc) {
     doc["Tamb"] = ambientTempSensor1;
     doc["scale"] = scaleSensor1;  
     doc["Tex1"] = *dht1;
-    doc["Tex2"] = *dht2;
-    doc["Tint"] = *dht3;
+    doc["Tex2"] = *dht3;
+    doc["Tint"] = *dht2;
 }
 
 bool alreadyLogged = false;
