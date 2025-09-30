@@ -32,7 +32,7 @@ ${BOARD}.mk:
 fixtty:
 	stty -F ${PORT} -hupcl -crtscts -echo raw 115200
 cat:    fixtty
-	cat ${PORT} | tee ./cat.out
+	while sleep .01; do cat ${PORT}; done | tee ./cat.out
 socat:  
 	socat udp-recvfrom:9000,fork - 
 mocat:
