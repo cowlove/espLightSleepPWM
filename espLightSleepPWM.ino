@@ -325,8 +325,8 @@ void readSensors(JsonDocument &doc) {
     doc["power"] = hal->digitalRead(pins.power);
     doc["Tamb"] = ambientTempSensor1;
     doc["scale"] = scaleSensor1;  
-    doc["Tex1"] = *dht3;
-    doc["Tex2"] = *dht2;
+    doc["Tex1"] = *dht2;
+    doc["Tex2"] = *dht3;
     doc["Tint"] = *dht1;
 }
 
