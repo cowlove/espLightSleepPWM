@@ -1,21 +1,24 @@
-BOARD ?= esp32s3
-PORT ?= /dev/ttyACM0
+BOARD ?= esp32c3
 CHIP ?= esp32
-VERBOSE=1
-EXCLUDE_DIRS=${HOME}/Arduino/libraries/lvgl|${HOME}/Arduino/libraries/LovyanGFX
+
+ALIBS=${HOME}/Arduino/libraries
+EXCLUDE_DIRS=${ALIBS}/lvgl|${ALIBS}/LovyanGFX|${ALIBS}/esp32csim|${ALIBS}/PubSubClient/tests
 PART_FILE=${ESP_ROOT}/tools/partitions/min_spiffs.csv
 GIT_VERSION := "$(shell git describe --abbrev=6 --dirty --always)"
-
-CDC_ON_BOOT=1
-
-#BUILD_EXTRA_FLAGS += -DARDUINO_PARTITION_huge_app 
 BUILD_EXTRA_FLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\" 
-	
+      
 #sed  's|^\(.*/srmodels.bin\)|#\1|g' -i ~/.arduino15/packages/esp32/hardware/esp32/3.2.0/boards.txt  
 
-
-
-UPLOAD_PORT ?= /dev/ttyACM0
+ifeq (${BOARD},esp32s3)
+        CDC_ON_BOOT=1
+        BUILD_MEMORY_TYPE=qio_opi
+        PORT ?= /dev/ttyACM0
+else
+        BUILD_MEMORY_TYPE=qio_qspi
+	CDC_ON_BOOT=1
+        PORT ?= /dev/ttyACM0
+endif
+UPLOAD_PORT ?= ${PORT}
 
 ifeq ($(BOARD),csim)
 SKETCH_NAME=$(shell basename `pwd`)
