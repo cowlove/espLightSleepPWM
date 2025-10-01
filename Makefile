@@ -23,17 +23,13 @@ usage:
 
 include ${BOARD}.mk
 
-.PHONY: gitVersion.h
-gitVersion.h:
-	echo \#define GIT_VERSION \"${GIT_VERSION}\" > gitVersion.h.TMP
-	cmp gitVersion.h.TMP gitVersion.h || mv gitVersion.h.TMP gitVersion.h
-	rm -f gitVersion.h.TMP
-
 ${BOARD}.mk:
 	@echo Running arduino-cli compile , this could take a while.  Upload failure is OK.
 	arduino-cli -v compile --build-path ./build/${BOARD}/ \
 		-b esp32:esp32:${BOARD} --board-options ${BOARD_OPTIONS} \
+	--build-property "build.extra_flags.esp32c3=-DGIT_VERSION=\"${GIT_VERSION}\"" \
 		-u -p ${PORT} | bin/cli-parser.py > ${BOARD}.mk
+
 
 fixtty:
 	stty -F ${PORT} -hupcl -crtscts -echo raw 115200
