@@ -88,6 +88,8 @@ ${SKETCH_NAME}_csim: ${CSIM_BUILD_DIR} ${CSIM_OBJS} ${CSIM_BUILD_DIR}/${SKETCH_N
 csim: ${SKETCH_NAME}_csim 
 	cp $< $@
 
+#bin:	gitVersion.h
+
 ${CSIM_BUILD_DIR}:
 	mkdir -p ${CSIM_BUILD_DIR}
 
