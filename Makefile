@@ -23,6 +23,12 @@ usage:
 
 include ${BOARD}.mk
 
+.PHONY: gitVersion.h
+gitVersion.h:
+	echo \#define GIT_VERSION \"${GIT_VERSION}\" > gitVersion.h.TMP
+	cmp gitVersion.h.TMP gitVersion.h || mv gitVersion.h.TMP gitVersion.h
+	rm -f gitVersion.h.TMP
+
 ${BOARD}.mk:
 	@echo Running arduino-cli compile , this could take a while.  Upload failure is OK.
 	arduino-cli -v compile --build-path ./build/${BOARD}/ \

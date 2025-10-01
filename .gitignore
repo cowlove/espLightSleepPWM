@@ -22,3 +22,4 @@ jimlib
 esp32*.mk
 esp32csim
 csim.mk
+gitVersion.h

@@ -15,6 +15,7 @@
 #include "serialLog.h"
 #include "RollingLeastSquares.h"
 #include "simulatedFailures.h"
+#include "gitVersion.h"
 
 JStuff j;
 	
