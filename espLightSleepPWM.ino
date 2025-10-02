@@ -375,7 +375,7 @@ void loop() {
 
     // Make a serial log entry
     if (j.secTick(2) || j.once()) {
-        vpdInt = getVpd(dht3);
+        vpdInt = getVpd(dht1);
         OUT("QQ %d nextl %.0f nextp %.0f snsrs %d lastsnsr %.0f ssr %.0f "
             "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d/%d heap %d,%d promRx %d",
             (int)logger.spiffsReportLog.size(), 
@@ -439,7 +439,7 @@ void loop() {
     if (hal->avgAnalogRead(pins.bv2) < config.minBatVolt) {
         OUT("Disabling fan due to battery voltage %.1f/%.1f", hal->avgAnalogRead(pins.bv2), config.minBatVolt);
         pwm = 0;
-    } else if (bv1 < 2500 && bv1 > 1050 && pwm == 0) {
+    } else if (bv1 < 2500 && bv1 > 1000 && pwm == 0) {
         pwm = 1; // minimal pwm setting to charge battery 
     }
     pwm = setFan(pwm);
