@@ -394,7 +394,8 @@ void loop() {
     if (alreadyLogged == false && 
         ((millis() - sampleStartTs) > sensorWaitSec * 1000 || sensorServer.getSleepRequest() > 0 || forcePost)) {
         //  TODO: || seems like an error ... &&?             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        float vpdExt = calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
+        float vpdExt = getVpd(dht3);
+//calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
         if (!isnan(vpdInt) 
             && (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint)) {
             float err = vpdInt - config.vpdSetPoint;
@@ -465,7 +466,7 @@ void loop() {
             lightSleep(sleepMs);
             alreadyLogged = false;  // TODO clean up this part that resets the loop like a reboot
             sampleStartTs = millis();
-            vpdInt = getVpd(dht3);
+            vpdInt = getVpd(dht1);
         }        
     }
     delay(10);
