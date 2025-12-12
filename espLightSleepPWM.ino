@@ -397,7 +397,8 @@ void loop() {
         float vpdExt = getVpd(dht3);
 //calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()); 
         if (!isnan(vpdInt) 
-            && (/*vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint*/)) {
+          //  && (vpdInt < config.vpdSetPoint || vpdExt < config.vpdSetPoint) 
+          {
             float err = vpdInt - config.vpdSetPoint;
             if (config.pid.iSum > 0) config.pid.iSum = 0; // TMP limit iSum to negative until we use a plant model 
             pwm = -config.pid.calc(err);
