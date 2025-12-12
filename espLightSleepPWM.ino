@@ -376,13 +376,14 @@ void loop() {
     // Make a serial log entry
     if (j.secTick(2) || j.once()) {
         vpdInt = getVpd(dht1);
+        float vpdExt = getVpd(dht3);
         OUT("QQ %d nextl %.0f nextp %.0f snsrs %d lastsnsr %.0f ssr %.0f "
             "ev %.1f iv %.1f bv1 %.1f pwm %d pow %d fs %d/%d heap %d,%d promRx %d",
             (int)logger.spiffsReportLog.size(), 
             config.sampleTime * 60 - (millis() - sampleStartTs) / 1000.0,
             logger.postFailTimer.getWaitMinutes() * 60 - logger.postPeriodTimer.elapsed() / 1000.0, 
             sensorServer.countSeen(), sensorServer.lastTrafficSec(), sensorServer.getSleepRequest(),
-            calcVpd(ambientTempSensor1.temp.getTemperature(), ambientTempSensor1.temp.getHumidity()),
+            vpdExt,
             vpdInt, hal->avgAnalogRead(pins.bv1), pwm, hal->digitalRead(pins.power),
             LittleFS.usedBytes(), LittleFS.totalBytes(), ESP.getMinFreeHeap(),
             ESP.getFreeHeap(), defaultEspNowMux.bwakeup.getRxCount()
