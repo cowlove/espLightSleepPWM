@@ -588,8 +588,8 @@ public:
         int pwm = Csim_currentPwm[2];
         wsim.run(pwm);
         
-        if (dht3) 
-            DHT::csim_set(dht3->pin, wsim.intT, wsim.intH);
+        if (dht1) 
+            DHT::csim_set(dht1->pin, wsim.intT, wsim.intH);
         SensorDHT *sensor = (SensorDHT *)client1.client.findByName("TEMP");
         if (sensor) 
             DHT::csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
