@@ -115,6 +115,8 @@ DeepSleepElapsedTimer realtimeMs("/deepsleep");
 #endif
 
 constexpr long double initialSimBv1 = 2450;
+// Deliberately bridge the simulation/ESP32 boundary: CSIM persists this RTC
+// section across its deep-sleep re-exec, while ESP32/HIL retains it in RTC RAM.
 SIM_RTC_DATA_ATTR long double persistentSimBv1 = initialSimBv1;
 
 //bool wifiConnect();
