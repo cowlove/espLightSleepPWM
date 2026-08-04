@@ -108,6 +108,15 @@ void setHITL();
 SPIFFSVariable<string> configString("/configString3", "");
 DeepSleepElapsedTimer realtimeMs("/deepsleep");
 
+#ifdef CSIM
+#define SIM_RTC_DATA_ATTR __attribute__((section("CSIM_RTC_MEM")))
+#else
+#define SIM_RTC_DATA_ATTR RTC_DATA_ATTR
+#endif
+
+constexpr long double initialSimBv1 = 2450;
+SIM_RTC_DATA_ATTR long double persistentSimBv1 = initialSimBv1;
+
 //bool wifiConnect();
 //void wifiDisconnect();
 void readConfig(); 
@@ -538,6 +547,12 @@ public:
   RollingAverage<float, 8> intTA, intHA, extTA, extHA;
   void run(int pwm) {
     now = millis();
+    // A deep-sleep wake is a process restart in CSIM, so the timer's local
+    // startup value is briefly small again.  Do not reinitialize the battery
+    // on that reset; only a fresh/non-deep-sleep start gets the initial value.
+    if (getResetReason(0) != 5 && realtimeMs.millis() < 2000)
+        persistentSimBv1 = initialSimBv1;
+    bv1 = persistentSimBv1;
     if (secTick(8)) { 
         // Keep the battery movement visible in a practical CSIM run.  The
         // old micro-unit increments were effectively static: they required
@@ -551,6 +566,7 @@ public:
         } else {
             bv1 = max(900.0L, bv1 - .1333L * speedUp);
         }
+        persistentSimBv1 = bv1;
         float day = realtimeMs.millis() / 3600000.0 / 24 * speedUp;
         intTA.add(max(2.0, cos(day * 2 * M_PI) * 30 - 4) + pwm * 0.3);
         intT = intTA.average();
