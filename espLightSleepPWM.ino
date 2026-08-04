@@ -278,8 +278,8 @@ public:
 } scaleSensor1("F8B3B77BBE20");
 
 RemoteSensorServer sensorServer({ 
-    //&ambientTempSensor1, 
-    //&scaleSensor1 
+    &ambientTempSensor1, 
+    &scaleSensor1 
 });
 
 void yieldMs(int ms) {
