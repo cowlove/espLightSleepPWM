@@ -539,10 +539,17 @@ public:
   void run(int pwm) {
     now = millis();
     if (secTick(8)) { 
+        // Keep the battery movement visible in a practical CSIM run.  The
+        // old micro-unit increments were effectively static: they required
+        // years of simulated time to cross the control thresholds.
+        // Model a battery that charges to a full-voltage plateau, then takes
+        // about five simulated hours to fall back through the fan-on
+        // threshold (2500) when the charger is off.  WorldSim updates every
+        // eight simulated seconds, so 300 / (5 * 3600 / 8) ~= 0.1333.
         if (hal->digitalRead(pins.power)) {
-            bv1 = min(2666.0L, bv1 + .000003L * speedUp);
+            bv1 = min(2800.0L, bv1 + .3L * speedUp);
         } else {
-            bv1 = max(900.0L, bv1 - .000001L * speedUp);
+            bv1 = max(900.0L, bv1 - .1333L * speedUp);
         }
         float day = realtimeMs.millis() / 3600000.0 / 24 * speedUp;
         intTA.add(max(2.0, cos(day * 2 * M_PI) * 30 - 4) + pwm * 0.3);
