@@ -18,6 +18,8 @@ UPLOAD_PORT ?= ${PORT}
 
 ifeq ($(BOARD),csim)
 SKETCH_NAME=$(shell basename `pwd`)
+csim: ${SKETCH_NAME}_csim ${CSIM_BUILD_DIR}
+	cp $< $@
 CSIM_BUILD_DIR=./build/csim
 CSIM_LIBS=Arduino_CRC32 ArduinoJson Adafruit_HX711 esp32jimlib
 CSIM_LIBS+=esp32csim
@@ -45,16 +47,14 @@ ${SKETCH_NAME}_csim: ${CSIM_BUILD_DIR} ${CSIM_OBJS} ${CSIM_BUILD_DIR}/${SKETCH_N
 	echo $@
 	g++ -g ${CSIM_CFLAGS} ${CSIM_OBJS} ${CSIM_BUILD_DIR}/${SKETCH_NAME}.o -o $@         
 
-csim: ${SKETCH_NAME}_csim ${CSIM_BUILD_DIR}
-	cp $< $@
 
 ${CSIM_BUILD_DIR}:
 	mkdir -p ${CSIM_BUILD_DIR}
 
 VPATH = $(sort $(dir $(CSIM_SRCS)))
 
-.PHONY: csim-clean
-csim-clean:
+.PHONY: clean
+clean:
 	rm -f ${CSIM_BUILD_DIR}/*.[od] ${SKETCH_NAME}_csim csim
 
 -include ${CSIM_BUILD_DIR}/*.d
