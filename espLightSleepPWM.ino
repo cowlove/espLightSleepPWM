@@ -275,7 +275,13 @@ public:
         dst["weight"] = dh.weight.get();
         return true;
     } 
-} scaleSensor1("F8B3B77BBE20");
+} scaleSensor1(
+#ifdef CSIM
+    "000000005678"
+#else
+    "F8B3B77BBE20"
+#endif
+);
 
 RemoteSensorServer sensorServer({ 
     &ambientTempSensor1, 
@@ -555,11 +561,16 @@ public:
 #ifdef CSIM
 ESPNOW_csimOneProg defaultEspNow;
 Csim_RemoteSensorClientContext client1(0x1234);
+Csim_RemoteSensorClientContext client2(0x5678);
+CsimHx711 scaleHx711(23, 18);
 
 class CsimSketch : public Csim_Module {
     WorldSim wsim;
 public:
     CsimSketch() {
+        // Client modules run before this sketch's first loop, so seed the
+        // HX711 model during static construction rather than in loop().
+        scaleHx711.setResult(123456);
         defaultContext.espnow = &defaultEspNow; 
     }
     string dummy;
@@ -592,6 +603,9 @@ public:
             DHT::csim_set(dht1->pin, wsim.intT, wsim.intH);
         SensorDHT *sensor = (SensorDHT *)client1.client.findByName("TEMP");
         if (sensor) 
+            DHT::csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
+        sensor = (SensorDHT *)client2.client.findByName("TEMP");
+        if (sensor)
             DHT::csim_set(sensor->dht.pin, wsim.extT, wsim.extH);
         
         Csim_pins().csim_analogSet(pins.bv1, wsim.bv1); // low enough to keep csim from deep sleeping
